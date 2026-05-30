@@ -81,12 +81,12 @@ litert_tunner.save_model(tunner_model, "model_int8_finetuned.tflite")
 
 ### 4.1 Quantization Representation
 
-| Component    | LiteRT storage | Tunner Keras representation | Trainable by default |
-|------------- |--------------- |---------------------------- |--------------------- |
-| Weights      | INT8           | INT8 (stored as-is)         | No                   |
-| Biases       | INT32          | Float32                     | Yes                  |
-| Scales       | Float32        | Float32                     | Yes                  |
-| Zero-points  | INT8/INT32     | Float32                     | Yes (configurable)   |
+| Component   | LiteRT storage | Tunner Keras representation | Trainable by default |
+| ----------- | -------------- | --------------------------- | -------------------- |
+| Weights     | INT8           | INT8 (stored as-is)         | No                   |
+| Biases      | INT32          | Float32                     | Yes                  |
+| Scales      | Float32        | Float32                     | Yes                  |
+| Zero-points | INT8/INT32     | Float32                     | Yes (configurable)   |
 
 - **Fake quantization nodes** simulate quantize → dequantize round-trips so
   forward pass matches the integer arithmetic of the real graph.
@@ -179,11 +179,11 @@ Python.
 
 **Why this approach (not JSON via `flatc`):**
 
-| Approach | Verdict | Reason |
-|----------|---------|--------|
-| `flatc` JSON round-trip | ❌ Rejected | Requires external `flatc` binary (not pip-installable), bloats large weight buffers into massive JSON, schema versioning fragility |
-| Binary surgery (overwrite bytes at offsets) | ⚠️ Possible but fragile | Fast and topology-preserving, but requires offset tracking and is error-prone |
-| **`tflite` Python package (parse → modify → Pack)** | ✅ Recommended | Pure Python, pip-installable, uses Object API (`ModelT`) for clean read-modify-write, no external tools needed |
+| Approach                                            | Verdict                 | Reason                                                                                                                             |
+| --------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `flatc` JSON round-trip                             | ❌ Rejected             | Requires external `flatc` binary (not pip-installable), bloats large weight buffers into massive JSON, schema versioning fragility |
+| Binary surgery (overwrite bytes at offsets)         | ⚠️ Possible but fragile | Fast and topology-preserving, but requires offset tracking and is error-prone                                                      |
+| **`tflite` Python package (parse → modify → Pack)** | ✅ Recommended          | Pure Python, pip-installable, uses Object API (`ModelT`) for clean read-modify-write, no external tools needed                     |
 
 **Workflow:**
 
@@ -221,13 +221,13 @@ ops and expand over time:
 1. **Phase 1 — Bootstrap**: Full infrastructure + `FullyConnected` (Dense)
    with no activation. The simplest possible model: a single `Dense(1)` layer,
    INT8 in / INT8 out. Get this matching bit-for-bit before anything else.
-2. **Phase 1b — Activations**: Add fused activation support (ReLU, ReLU6).
+1. **Phase 1b — Activations**: Add fused activation support (ReLU, ReLU6).
    Test with `Dense(..., activation="relu")`.
-3. **Phase 2 — Convolutions**: Conv2D, DepthwiseConv2D (per-channel quant).
-4. **Phase 3 — Pooling & Reshape**: MaxPool2D, AveragePool2D, Reshape, Flatten.
-5. **Phase 4 — Normalization & Skip**: BatchNormalization (fused), Add
+1. **Phase 2 — Convolutions**: Conv2D, DepthwiseConv2D (per-channel quant).
+1. **Phase 3 — Pooling & Reshape**: MaxPool2D, AveragePool2D, Reshape, Flatten.
+1. **Phase 4 — Normalization & Skip**: BatchNormalization (fused), Add
    (residual connections — requires input requantization).
-6. **Phase 5 — Advanced**: Softmax (fixed-point LUT — hard to match exactly),
+1. **Phase 5 — Advanced**: Softmax (fixed-point LUT — hard to match exactly),
    Concatenation, Transpose, Pad, etc.
 
 Each new operation must include its own unit tests before being considered
@@ -313,6 +313,7 @@ flatbuffer.save_tflite(model, "out.tflite")
 
 # ✅ Also correct — import submodule
 from litert_tunner.graph import types
+
 tensor = types.TensorInfo(...)
 
 # ❌ Wrong — importing symbols directly
@@ -334,6 +335,7 @@ the `test` keyword from the descriptive name:
 def test__dense_output_matches_interpreter(): ...
 def test__load_save_identity(): ...
 def test__quantize_dequantize_roundtrip(): ...
+
 
 # ❌ Wrong — single underscore
 def test_dense_output_matches_interpreter(): ...
@@ -359,12 +361,16 @@ The tunner model must be **backend-agnostic** using Keras 3:
 
 - **Use `keras.ops`** for all numerical operations — never use `tf.`, `jax.`,
   or `torch.` directly in production code.
+
 - **Use `keras.Layer`** subclasses for custom layers (fake-quant nodes, op
   implementations).
+
 - **TF-specific code is allowed only in tests** — for `tf.lite.Interpreter`,
   `tf.lite.TFLiteConverter`, and test model export. These should be isolated
   in test utilities.
+
 - **Import pattern**:
+
   ```python
   # ✅ Production code
   import keras
@@ -409,10 +415,10 @@ should) be split into independent steps.
 For each new op, the agent must:
 
 1. **Define a minimal Keras model** using that op (e.g., a single Dense layer).
-2. **Export it** to LiteRT INT8 using `tf.lite.TFLiteConverter` with
+1. **Export it** to LiteRT INT8 using `tf.lite.TFLiteConverter` with
    representative dataset calibration.
-3. **Load it** with `litert_tunner.load_model()`.
-4. **Compare outputs**: `tunner_model.predict(inputs)` vs
+1. **Load it** with `litert_tunner.load_model()`.
+1. **Compare outputs**: `tunner_model.predict(inputs)` vs
    `tf.lite.Interpreter` — must match within numerical noise
    (typically `atol=1, rtol=0` for int8 output comparison, or appropriate
    tolerance for float comparisons).
@@ -420,18 +426,18 @@ For each new op, the agent must:
 ### 7.2 Load/Save Round-trip
 
 1. Load a `.tflite` model with `litert_tunner.load_model()`.
-2. Save it back with `litert_tunner.save_model()` (no fine-tuning).
-3. Load the saved model with `tf.lite.Interpreter`.
-4. Compare outputs to the original — must be **bit-exact identical**.
+1. Save it back with `litert_tunner.save_model()` (no fine-tuning).
+1. Load the saved model with `tf.lite.Interpreter`.
+1. Compare outputs to the original — must be **bit-exact identical**.
 
 ### 7.3 Fine-tuning Smoke Test
 
 1. Train a small Keras model → export INT8.
-2. Load with `litert_tunner.load_model()`.
-3. Measure initial gap: `|tunner_model.predict(x) - original_model.predict(x)|`.
-4. Fine-tune the tunner model using the original model outputs as targets.
-5. Verify the gap decreases.
-6. Save and re-load — verify the saved model also shows the improved gap.
+1. Load with `litert_tunner.load_model()`.
+1. Measure initial gap: `|tunner_model.predict(x) - original_model.predict(x)|`.
+1. Fine-tune the tunner model using the original model outputs as targets.
+1. Verify the gap decreases.
+1. Save and re-load — verify the saved model also shows the improved gap.
 
 ### 7.4 Running Tests
 

@@ -10,10 +10,17 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "litert-tunner contributors" }]
-dependencies = []
+dependencies = [
+  "keras>=3.0",
+  "numpy",
+  "tflite>=2.18.0",
+  "flatbuffers",
+]
 
 [project.optional-dependencies]
 dev = [
+  "tensorflow>=2.18.0",
+  "ai-edge-litert",
   "bump-my-version>=0.26.0",
   "pre-commit>=3.7.0",
   "pytest>=8.2.0",
