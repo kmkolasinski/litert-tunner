@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import keras
@@ -26,8 +27,6 @@ def test__trainer_finetuning_e2e(temp_model_dir, caplog):
     litert_model = litert_tunner.load_model(str(output_path))
 
     # 4. Prepare for fine-tuning (freeze weights, unfreeze biases and scales)
-    import logging
-
     with caplog.at_level(logging.INFO):
         litert_tunner.prepare_for_finetuning(litert_model)
 
