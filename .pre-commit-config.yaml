@@ -39,6 +39,7 @@ repos:
         files: (^.*\.py$|^scripts/vision3-.*$)
         types_or: [ python, file ]
       - id: ruff
+        args: [ --fix ]
         files: (^.*\.py$|^scripts/vision3-.*$)
         types_or: [ python, file ]
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Callable
+
 import numpy as np
 
 import litert_tunner
@@ -10,7 +11,9 @@ import litert_tunner
 
 def test__dense_no_activation(make_dense_tflite: Callable, run_interpreter: Callable):
     """Verify that a single dense layer model matches Interpreter output."""
-    model_path = make_dense_tflite(num_features=8, num_units=1, use_bias=True, activation=None, float_io=False)
+    model_path = make_dense_tflite(
+        num_features=8, num_units=1, use_bias=True, activation=None, float_io=False
+    )
 
     # Load model in litert-tunner
     tunner_model = litert_tunner.load_model(str(model_path))
@@ -48,7 +51,9 @@ def test__dense_no_activation(make_dense_tflite: Callable, run_interpreter: Call
 
 def test__dense_multiple_units(make_dense_tflite: Callable, run_interpreter: Callable):
     """Verify multiple output units match Interpreter output."""
-    model_path = make_dense_tflite(num_features=8, num_units=4, use_bias=True, activation="relu", float_io=False)
+    model_path = make_dense_tflite(
+        num_features=8, num_units=4, use_bias=True, activation="relu", float_io=False
+    )
     tunner_model = litert_tunner.load_model(str(model_path))
 
     inputs = np.random.uniform(-1.0, 1.0, (1, 8)).astype(np.float32)
@@ -76,7 +81,9 @@ def test__dense_multiple_units(make_dense_tflite: Callable, run_interpreter: Cal
 
 def test__dense_float32_io(make_dense_tflite: Callable, run_interpreter: Callable):
     """Verify float32 I/O models match Interpreter output with small tolerance."""
-    model_path = make_dense_tflite(num_features=8, num_units=2, use_bias=True, activation="relu6", float_io=True)
+    model_path = make_dense_tflite(
+        num_features=8, num_units=2, use_bias=True, activation="relu6", float_io=True
+    )
     tunner_model = litert_tunner.load_model(str(model_path))
 
     inputs = np.random.uniform(-1.0, 1.0, (1, 8)).astype(np.float32)

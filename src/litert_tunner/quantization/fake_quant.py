@@ -45,6 +45,7 @@ class FakeQuantize(keras.Layer):
         self._trainable_params = trainable
 
     def build(self, input_shape):
+        """Create scale and zero_point weights for the layer."""
         self.scale = self.add_weight(
             name="scale",
             shape=(),
@@ -64,6 +65,7 @@ class FakeQuantize(keras.Layer):
         return _fake_quantize(x, self.scale, self.zero_point)
 
     def get_config(self):
+        """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
         config.update(
             {
@@ -99,6 +101,7 @@ class Dequantize(keras.Layer):
         self._initial_zero_point = zero_point
 
     def build(self, input_shape):
+        """Create scale and zero_point weights for the layer."""
         self.scale = self.add_weight(
             name="scale",
             shape=(),
@@ -119,6 +122,7 @@ class Dequantize(keras.Layer):
         return self.scale * (x_float - self.zero_point)
 
     def get_config(self):
+        """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
         config.update(
             {
@@ -157,6 +161,7 @@ class Quantize(keras.Layer):
         self._trainable_params = trainable
 
     def build(self, input_shape):
+        """Create scale and zero_point weights for the layer."""
         self.scale = self.add_weight(
             name="scale",
             shape=(),
@@ -176,6 +181,7 @@ class Quantize(keras.Layer):
         return _quantize_ste(x, self.scale, self.zero_point)
 
     def get_config(self):
+        """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
         config.update(
             {

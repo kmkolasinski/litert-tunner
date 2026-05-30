@@ -74,6 +74,7 @@ class QuantizedDense(keras.Layer):
         self._fused_activation = fused_activation
 
     def build(self, input_shape):
+        """Create the weights (bias, scale, zero_point) for the layer."""
         # Frozen INT8 weights — stored as float32 for computation
         self.weight_int8 = self.add_weight(
             name="weight_int8",
@@ -177,6 +178,7 @@ class QuantizedDense(keras.Layer):
             raise ValueError(msg)
 
     def get_config(self):
+        """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
         config.update(
             {

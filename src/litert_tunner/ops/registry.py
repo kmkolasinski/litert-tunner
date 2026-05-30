@@ -8,7 +8,6 @@ the corresponding Keras layers. New ops are registered via the
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 import keras
 
@@ -42,6 +41,7 @@ def register_op(op_type: str) -> Callable[[OpBuilder], OpBuilder]:
     """
 
     def decorator(fn: OpBuilder) -> OpBuilder:
+        """Register the builder function for the specified op type."""
         if op_type in _REGISTRY:
             msg = f"Op '{op_type}' is already registered"
             raise ValueError(msg)

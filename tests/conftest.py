@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
-from ai_edge_litert.interpreter import Interpreter
+
+import keras
 import numpy as np
 import pytest
 import tensorflow as tf
+from ai_edge_litert.interpreter import Interpreter
 
 
 @pytest.fixture
@@ -32,15 +34,15 @@ def make_dense_tflite(temp_model_dir: Path) -> Callable:
         tf.random.set_seed(seed)
 
         # Build Keras model
-        inputs = tf.keras.Input(shape=(num_features,))
-        outputs = tf.keras.layers.Dense(
+        inputs = keras.Input(shape=(num_features,))
+        outputs = keras.layers.Dense(
             units=num_units,
             use_bias=use_bias,
             activation=activation,
-            kernel_initializer=tf.keras.initializers.RandomUniform(-0.5, 0.5),
-            bias_initializer=tf.keras.initializers.RandomUniform(-0.1, 0.1),
+            kernel_initializer=keras.initializers.RandomUniform(-0.5, 0.5),
+            bias_initializer=keras.initializers.RandomUniform(-0.1, 0.1),
         )(inputs)
-        model = tf.keras.Model(inputs=inputs, outputs=outputs)
+        model = keras.Model(inputs=inputs, outputs=outputs)
 
         # Define representative dataset for quantization calibration
         def representative_dataset_gen():
@@ -76,9 +78,10 @@ def run_interpreter() -> Callable:
 
     def _run(model_path: Path | str, input_data: np.ndarray) -> np.ndarray:
         interpreter = Interpreter(model_path=str(model_path))
+        input_details = interpreter.get_input_details()
+        interpreter.resize_tensor_input(input_details[0]["index"], list(input_data.shape))
         interpreter.allocate_tensors()
 
-        input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
 
         # Handle INT8 input type conversion / scaling

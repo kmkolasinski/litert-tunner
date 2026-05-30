@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
-from ai_edge_litert.interpreter import Interpreter
+
 import numpy as np
+from ai_edge_litert.interpreter import Interpreter
 
 import litert_tunner
 

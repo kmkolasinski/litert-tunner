@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import flatbuffers
+import flatbuffers.number_types
 import keras
 import numpy as np
 import tflite
@@ -33,6 +34,7 @@ def save_tflite(model: keras.Model, path: str | Path):
     subgraph_t = model_obj.Subgraphs(0)
 
     def overwrite_buffer(buffer_idx: int, new_data: bytes):
+        """Overwrite the buffer data in-place at the specified index."""
         buffer_t = model_obj.Buffers(buffer_idx)
         o = flatbuffers.number_types.UOffsetTFlags.py_type(buffer_t._tab.Offset(4))
         if o != 0:
@@ -45,6 +47,7 @@ def save_tflite(model: keras.Model, path: str | Path):
             buf[offset : offset + length] = new_data
 
     def overwrite_quantization(tensor_idx: int, scales: list[float], zero_points: list[int]):
+        """Overwrite scales and zero points in-place for a specific tensor."""
         tensor_t = subgraph_t.Tensors(tensor_idx)
         quant_t = tensor_t.Quantization()
         if quant_t is None:
@@ -73,9 +76,9 @@ def save_tflite(model: keras.Model, path: str | Path):
         if op.op_type == "FULLY_CONNECTED":
             layer_name = f"quantized_dense_{op.output_indices[0]}"
             layer = None
-            for l in model.layers:
-                if l.name == layer_name:
-                    layer = l
+            for lyr in model.layers:
+                if lyr.name == layer_name:
+                    layer = lyr
                     break
             if layer is None:
                 continue
@@ -117,9 +120,9 @@ def save_tflite(model: keras.Model, path: str | Path):
         elif op.op_type == "QUANTIZE":
             layer_name = f"quantize_{op.output_indices[0]}"
             layer = None
-            for l in model.layers:
-                if l.name == layer_name:
-                    layer = l
+            for lyr in model.layers:
+                if lyr.name == layer_name:
+                    layer = lyr
                     break
             if layer is None:
                 continue
@@ -132,9 +135,9 @@ def save_tflite(model: keras.Model, path: str | Path):
         elif op.op_type == "DEQUANTIZE":
             layer_name = f"dequantize_{op.output_indices[0]}"
             layer = None
-            for l in model.layers:
-                if l.name == layer_name:
-                    layer = l
+            for lyr in model.layers:
+                if lyr.name == layer_name:
+                    layer = lyr
                     break
             if layer is None:
                 continue

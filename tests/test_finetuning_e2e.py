@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
+
 import numpy as np
 
 import litert_tunner
@@ -14,7 +15,9 @@ def test__finetuning_smoke_test(
     run_interpreter: Callable,
     tmp_path: Path,
 ):
-    """Verify that we can load a model, fine-tune it (update biases/scales), and reduce the prediction gap."""
+    """Verify that we can load a model, fine-tune it (update biases/scales),
+    and reduce the prediction gap.
+    """
     # 1. Create a quantized dense model with float I/O to make validation simpler
     model_path = make_dense_tflite(
         num_features=8,
