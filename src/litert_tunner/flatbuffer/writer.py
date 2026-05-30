@@ -4,8 +4,6 @@ Updates buffer data and quantization parameters in a TFLite flatbuffer using
 values from a trained Keras model.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import flatbuffers
