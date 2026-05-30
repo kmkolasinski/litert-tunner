@@ -24,6 +24,15 @@ dev = [
   "bump-my-version>=0.26.0",
   "pre-commit>=3.7.0",
   "pytest>=8.2.0",
+  "pytest-cov",
+  "pytest-mock",
+  "pytest-sugar",
+  "pytest-watch",
+  "pytest-forked",
+  "pytest-randomly",
+  "pytest-xdist",
+  "pytest-dotenv",
+  "types-tensorflow",
   "ruff>=0.5.0",
   "ty>=0.0.1a8",
 ]
@@ -35,8 +44,33 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
-testpaths = ["tests"]
+testpaths = [
+    "tests",
+]
+
+# Load environment variables from pytest.env file
+env_files = [
+    "pytest.env",
+]
+
+addopts = [
+    "-vv",
+    "-n",
+    "4",
+    "--durations=20",
+    "--forked",
+    "--cov-branch",
+    "--cov-report=term",
+    "--cov-report=html:test-results/htmlcov",
+    "--no-cov-on-fail",
+    "--junit-xml=test-results/junit.xml",
+    "--cov-fail-under=70",
+    "--randomly-seed=32",
+]
+
+[tool.coverage.run]
+parallel = true
+patch = ["_exit"]
 
 [tool.ruff]
 target-version = "py311"

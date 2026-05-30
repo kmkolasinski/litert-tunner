@@ -15,7 +15,7 @@ import numpy as np
 from keras import ops
 
 from litert_tunner.graph import types
-from litert_tunner.ops import registry
+from litert_tunner.ops import registry, utils
 from litert_tunner.quantization import fake_quant
 
 # Fused activation function codes from TFLite schema
@@ -155,16 +155,8 @@ class QuantizedDense(keras.Layer):
         input_float = self.input_scale * (x - self.input_zero_point)
 
         # 2. Dequantize weights: float = scale * (int8 - zero_point)
-        if len(self.weight_scale.shape) > 0:
-            scale_expanded = ops.expand_dims(self.weight_scale, 1)
-        else:
-            scale_expanded = self.weight_scale
-
-        if len(self.weight_zero_point.shape) > 0:
-            zp_expanded = ops.expand_dims(self.weight_zero_point, 1)
-        else:
-            zp_expanded = self.weight_zero_point
-
+        scale_expanded = utils.expand_dims_if_not_scalar(self.weight_scale, 1)
+        zp_expanded = utils.expand_dims_if_not_scalar(self.weight_zero_point, 1)
         weight_float = scale_expanded * (self.weight_int8 - zp_expanded)
 
         # 3. Matmul + bias (in float32, simulating INT32 accumulation)
@@ -235,8 +227,7 @@ class QuantizedDense(keras.Layer):
         op_outputs = typing.cast(typing.Any, op.output_indices)
 
         # Write weight_int8 buffer
-        weight_val = typing.cast(np.ndarray, ops.convert_to_numpy(self.weight_int8))
-        weight_int8 = np.round(weight_val).astype(np.int8)
+        weight_int8 = utils.quantize_to_int8(self.weight_int8)
         weight_tensor_idx = op_inputs[1]
         buffer_writes.append(
             types.BufferWriteOp(tensor_index=weight_tensor_idx, data=bytes(weight_int8.tobytes()))
@@ -244,39 +235,25 @@ class QuantizedDense(keras.Layer):
 
         # Write bias buffer (if present)
         if len(op_inputs) > 2 and op_inputs[2] >= 0:
-            bias_val = typing.cast(np.ndarray, ops.convert_to_numpy(self.bias))
-            input_scale_val = float(typing.cast(typing.Any, ops.convert_to_numpy(self.input_scale)))
-            weight_scale_val = typing.cast(np.ndarray, ops.convert_to_numpy(self.weight_scale))
-            weight_scale_arr = np.asarray(weight_scale_val)
-            bias_scale = input_scale_val * weight_scale_arr
-            bias_int32 = np.round(bias_val / bias_scale).astype(np.int32)
+            bias_int32 = utils.quantize_bias_to_int32(
+                self.bias, self.input_scale, self.weight_scale
+            )
             buffer_writes.append(
                 types.BufferWriteOp(tensor_index=op_inputs[2], data=bytes(bias_int32.tobytes()))
             )
 
         # Write quantization params
         input_tensor_idx = op_inputs[0]
-        in_scale = float(typing.cast(typing.Any, ops.convert_to_numpy(self.input_scale)))
-        in_zp = int(np.round(typing.cast(typing.Any, ops.convert_to_numpy(self.input_zero_point))))
+        in_scale = utils.to_float_list(self.input_scale)[0]
+        in_zp = utils.to_int_list(self.input_zero_point)[0]
         quant_writes.append(
             types.QuantizationWriteOp(
                 tensor_index=input_tensor_idx, scales=[in_scale], zero_points=[in_zp]
             )
         )
 
-        w_scale_val = typing.cast(np.ndarray, ops.convert_to_numpy(self.weight_scale))
-        w_scale_arr = np.asarray(w_scale_val)
-        if w_scale_arr.ndim == 0:
-            w_scales_list = [float(w_scale_arr)]
-        else:
-            w_scales_list = [float(s) for s in w_scale_arr]
-
-        w_zp_val = typing.cast(np.ndarray, ops.convert_to_numpy(self.weight_zero_point))
-        w_zp_arr = np.asarray(w_zp_val)
-        if w_zp_arr.ndim == 0:
-            w_zps_list = [int(np.round(w_zp_arr))]
-        else:
-            w_zps_list = [int(np.round(z)) for z in w_zp_arr]
+        w_scales_list = utils.to_float_list(self.weight_scale)
+        w_zps_list = utils.to_int_list(self.weight_zero_point)
 
         quant_writes.append(
             types.QuantizationWriteOp(
@@ -285,10 +262,8 @@ class QuantizedDense(keras.Layer):
         )
 
         output_tensor_idx = op_outputs[0]
-        out_scale = float(typing.cast(typing.Any, ops.convert_to_numpy(self.output_scale)))
-        out_zp = int(
-            np.round(typing.cast(typing.Any, ops.convert_to_numpy(self.output_zero_point)))
-        )
+        out_scale = utils.to_float_list(self.output_scale)[0]
+        out_zp = utils.to_int_list(self.output_zero_point)[0]
         quant_writes.append(
             types.QuantizationWriteOp(
                 tensor_index=output_tensor_idx, scales=[out_scale], zero_points=[out_zp]
@@ -340,34 +315,19 @@ def build_fully_connected(
         msg = "FullyConnected requires quantized input, weight, and output tensors"
         raise ValueError(msg)
 
-    # Handle optional bias
-    if len(op.input_indices) > 2 and op.input_indices[2] >= 0:
-        bias_tensor = tensors[op.input_indices[2]]
-        if bias_tensor.data is not None:
-            # TFLite stores bias as INT32; convert to float32
-            # bias_float = bias_int32 * (input_scale * weight_scale)
-            bias_scale = float(input_quant.scales[0]) * weight_quant.scales.astype(np.float64)
-            bias_float = bias_tensor.data.astype(np.float32) * bias_scale.astype(np.float32)
-        else:
-            output_units = weight_tensor.shape[0]
-            bias_float = np.zeros(output_units, dtype=np.float32)
-    else:
-        output_units = weight_tensor.shape[0]
-        bias_float = np.zeros(output_units, dtype=np.float32)
+    output_units = weight_tensor.shape[0]
+    bias_float = utils.get_bias_float32(
+        op=op,
+        tensors=tensors,
+        input_scale=float(input_quant.scales[0]),
+        weight_scales=weight_quant.scales,
+        output_units=output_units,
+    )
 
     fused_activation = op.options.get("fused_activation_function", _FUSED_ACTIVATION_NONE)
 
-    weight_scale = weight_quant.scales
-    if len(weight_scale) == 1:
-        weight_scale_val = float(weight_scale[0])
-    else:
-        weight_scale_val = weight_scale.astype(np.float32)
-
-    weight_zp = weight_quant.zero_points
-    if len(weight_zp) == 1:
-        weight_zp_val = float(weight_zp[0])
-    else:
-        weight_zp_val = weight_zp.astype(np.float32)
+    weight_scale_val = utils.get_quant_param_value(weight_quant.scales)
+    weight_zp_val = utils.get_quant_param_value(weight_quant.zero_points)
 
     return QuantizedDense(
         weight_int8=weight_tensor.data,

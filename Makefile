@@ -12,7 +12,7 @@ install: ## Installs the project in editable mode with dev dependencies
 	uv pip install -e ".[dev]"
 
 test: ## Runs the tests
-	pytest tests
+	python -m pytest
 
 precommit: ## Runs the pre-commit hooks
 	pre-commit run --all-files
