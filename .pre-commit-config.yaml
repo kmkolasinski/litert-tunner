@@ -1,13 +1,69 @@
+exclude: "^docs/|/migrations/|pull_request_template.md"
+default_stages: [commit]
+fail_fast: true
+
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: detect-private-key
+      # - id: no-commit-to-branch
+      #   args:
+      #   - --branch=main
+
+  # Markdown Formatting
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.22
+    hooks:
+      - id: mdformat
+        additional_dependencies:
+          - mdformat-gfm
+          - mdformat-black
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.45.0
+    hooks:
+      - id: markdownlint
+        args: ["--config", ".markdownlint.json"]
+      - id: markdownlint-fix
+
+  # Code Quality
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.2
+    hooks:
+      - id: ruff-format
+        files: (^.*\.py$|^scripts/vision3-.*$)
+        types_or: [ python, file ]
+      - id: ruff
+        files: (^.*\.py$|^scripts/vision3-.*$)
+        types_or: [ python, file ]
+
+  - repo: https://github.com/econchick/interrogate
+    rev: 1.7.0
+    hooks:
+      - id: interrogate
+        language_version: python3.11
+        args: ["--config=pyproject.toml"]
+        exclude: |
+          (?x)^(
+            ^tests/.*|
+          )$
+
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.8.1
+    hooks:
+      - id: nbstripout
+
+  # Type Checking
   - repo: local
     hooks:
-      - id: ruff
-        name: ruff
-        entry: ruff check
-        language: system
-        types: [python]
       - id: ty
         name: ty
         entry: ty check
         language: system
         types: [python]
+        pass_filenames: false
