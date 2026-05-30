@@ -137,7 +137,7 @@ def build_layer_from_registry(
 def build_and_call(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
-    input_data: np.ndarray,
+    input_data: np.ndarray | list[np.ndarray],
 ) -> tuple[keras.Layer, np.ndarray]:
     """Build a layer from the registry, call it, and return both.
 
@@ -147,13 +147,17 @@ def build_and_call(
     Args:
         op: Operator info describing the op.
         tensors: Full tensor table.
-        input_data: Input numpy array (float32).
+        input_data: Input numpy array (float32) or list of arrays.
 
     Returns:
         A tuple of ``(layer, output_numpy)``.
     """
     layer = build_layer_from_registry(op, tensors)
-    output = layer(keras.ops.convert_to_tensor(input_data))
+    if isinstance(input_data, list):
+        keras_input = [keras.ops.convert_to_tensor(x) for x in input_data]
+    else:
+        keras_input = keras.ops.convert_to_tensor(input_data)
+    output = layer(keras_input)
     output_np = np.asarray(keras.ops.convert_to_numpy(output))
     return layer, output_np
 
