@@ -113,46 +113,29 @@ class QuantizedConv2D(keras.Layer, types.Writable):
         )
 
         # Input quantization params (frozen)
-        self.input_scale = self.add_weight(
-            name="input_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input_scale),
-            trainable=False,
-        )
-        self.input_zero_point = self.add_weight(
-            name="input_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input_zero_point),
+        self.input_quant = utils.QuantizationVars(
+            self,
+            "input",
+            self._input_scale,
+            self._input_zero_point,
             trainable=False,
         )
 
         # Weight quantization params (frozen, may be per-channel)
-        weight_scale_arr = np.asarray(self._weight_scale)
-        self.weight_scale = self.add_weight(
-            name="weight_scale",
-            shape=weight_scale_arr.shape,
-            initializer=keras.initializers.Constant(typing.cast("float", weight_scale_arr)),
-            trainable=False,
-        )
-        weight_zp_arr = np.asarray(self._weight_zero_point)
-        self.weight_zero_point = self.add_weight(
-            name="weight_zero_point",
-            shape=weight_zp_arr.shape,
-            initializer=keras.initializers.Constant(typing.cast("float", weight_zp_arr)),
+        self.weight_quant = utils.QuantizationVars(
+            self,
+            "weight",
+            self._weight_scale,
+            self._weight_zero_point,
             trainable=False,
         )
 
         # Output quantization params (trainable)
-        self.output_scale = self.add_weight(
-            name="output_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._output_scale),
-            trainable=True,
-        )
-        self.output_zero_point = self.add_weight(
-            name="output_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._output_zero_point),
+        self.output_quant = utils.QuantizationVars(
+            self,
+            "output",
+            self._output_scale,
+            self._output_zero_point,
             trainable=True,
         )
 
@@ -168,13 +151,13 @@ class QuantizedConv2D(keras.Layer, types.Writable):
             Output tensor after fake-quantized convolution.
         """
         # 1. Dequantize input: float = scale * (int8 - zero_point)
-        input_float = utils.dequantize_ste(x, self.input_scale, self.input_zero_point)
+        input_float = self.input_quant.dequantize(x)
 
         # 2. Dequantize weights (per-channel along output channel axis 0)
         # TFLite Conv2D weight shape: (out_ch, kH, kW, in_ch)
         # Scale shape: (out_ch,) → expand to (out_ch, 1, 1, 1)
-        weight_scale = self.weight_scale
-        weight_zp = self.weight_zero_point
+        weight_scale = self.weight_quant.scale
+        weight_zp = self.weight_quant.zero_point
         if len(weight_scale.shape) > 0:
             weight_scale = ops.reshape(weight_scale, (-1, 1, 1, 1))
             weight_zp = ops.reshape(weight_zp, (-1, 1, 1, 1))
@@ -197,7 +180,7 @@ class QuantizedConv2D(keras.Layer, types.Writable):
         output = utils.apply_fused_activation(output, self._fused_activation)
 
         # 5. Quantize output to simulated INT8 (with STE for gradient flow)
-        return utils.quantize_ste(output, self.output_scale, self.output_zero_point)
+        return self.output_quant.quantize(output)
 
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
@@ -253,7 +236,7 @@ class QuantizedConv2D(keras.Layer, types.Writable):
         bias_index = 2
         if len(op_inputs) > bias_index and op_inputs[bias_index] >= 0:
             bias_int32 = utils.quantize_bias_to_int32(
-                self.bias, self.input_scale, self.weight_scale
+                self.bias, self.input_quant.scale, self.weight_quant.scale
             )
             buffer_writes.append(
                 types.BufferWriteOp(tensor_index=op_inputs[2], data=bytes(bias_int32.tobytes()))
@@ -261,16 +244,10 @@ class QuantizedConv2D(keras.Layer, types.Writable):
 
         # Write quantization params
         input_tensor_idx = op_inputs[0]
-        quant_writes.append(
-            utils.make_quant_write_op(input_tensor_idx, self.input_scale, self.input_zero_point)
-        )
-        quant_writes.append(
-            utils.make_quant_write_op(weight_tensor_idx, self.weight_scale, self.weight_zero_point)
-        )
+        quant_writes.append(self.input_quant.make_write_op(input_tensor_idx))
+        quant_writes.append(self.weight_quant.make_write_op(weight_tensor_idx))
         output_tensor_idx = op_outputs[0]
-        quant_writes.append(
-            utils.make_quant_write_op(output_tensor_idx, self.output_scale, self.output_zero_point)
-        )
+        quant_writes.append(self.output_quant.make_write_op(output_tensor_idx))
 
         return buffer_writes, quant_writes
 

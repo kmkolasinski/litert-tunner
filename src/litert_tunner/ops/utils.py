@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import typing
 
+import keras
 import numpy as np
 from keras import ops
 
@@ -250,7 +251,7 @@ def dequantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrSca
     return scale * (x_float - zero_point)
 
 
-def _fake_quantize(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
+def fake_quantize(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
     """Fake quantize: quantize then dequantize with STE gradients."""
     quantized = quantize_ste(x, scale, zero_point)
     return dequantize_ste(quantized, scale, zero_point)
@@ -330,3 +331,43 @@ def extract_constant_input(
             # Store it as float32 for computation (simulated INT8 values).
             return tensor.data.astype(np.float32), idx
     return None, -1
+
+
+class QuantizationVars:
+    """A container for quantization scale and zero_point variables."""
+
+    def __init__(
+        self,
+        layer: keras.Layer,
+        name: str,
+        scale: np.ndarray | float,
+        zero_point: np.ndarray | float,
+        *,
+        trainable: bool,
+    ):
+        name_scale = f"{name}_scale" if name else "scale"
+        name_zp = f"{name}_zero_point" if name else "zero_point"
+        self.scale = layer.add_weight(
+            name=name_scale,
+            shape=np.shape(scale),
+            initializer=keras.initializers.Constant(typing.cast("float", scale)),
+            trainable=trainable,
+        )
+        self.zero_point = layer.add_weight(
+            name=name_zp,
+            shape=np.shape(zero_point),
+            initializer=keras.initializers.Constant(typing.cast("float", zero_point)),
+            trainable=trainable,
+        )
+
+    def dequantize(self, x: TensorLike) -> TensorLike:
+        """Dequantize an INT8 tensor to Float32."""
+        return dequantize_ste(x, self.scale, self.zero_point)
+
+    def quantize(self, x: TensorLike) -> TensorLike:
+        """Quantize a Float32 tensor to INT8."""
+        return quantize_ste(x, self.scale, self.zero_point)
+
+    def make_write_op(self, tensor_index: int) -> types.QuantizationWriteOp:
+        """Create a write operation for these variables."""
+        return make_quant_write_op(tensor_index, self.scale, self.zero_point)

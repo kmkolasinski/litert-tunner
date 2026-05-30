@@ -57,42 +57,27 @@ class QuantizedSub(keras.Layer, types.Writable):
 
     def build(self, input_shape: ShapeLike) -> None:
         """Create quantization params."""
-        self.input1_scale = self.add_weight(
-            name="input1_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input1_scale),
+        self.input1_quant = utils.QuantizationVars(
+            self,
+            "input1",
+            self._input1_scale,
+            self._input1_zero_point,
             trainable=False,
         )
-        self.input1_zero_point = self.add_weight(
-            name="input1_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input1_zero_point),
-            trainable=False,
-        )
-        self.input2_scale = self.add_weight(
-            name="input2_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input2_scale),
-            trainable=False,
-        )
-        self.input2_zero_point = self.add_weight(
-            name="input2_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input2_zero_point),
+        self.input2_quant = utils.QuantizationVars(
+            self,
+            "input2",
+            self._input2_scale,
+            self._input2_zero_point,
             trainable=False,
         )
 
         # Output quantization params (trainable)
-        self.output_scale = self.add_weight(
-            name="output_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._output_scale),
-            trainable=True,
-        )
-        self.output_zero_point = self.add_weight(
-            name="output_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._output_zero_point),
+        self.output_quant = utils.QuantizationVars(
+            self,
+            "output",
+            self._output_scale,
+            self._output_zero_point,
             trainable=True,
         )
 
@@ -128,14 +113,14 @@ class QuantizedSub(keras.Layer, types.Writable):
             x1, x2 = inputs
 
         # 1. Dequantize
-        x1_float = utils.dequantize_ste(x1, self.input1_scale, self.input1_zero_point)
-        x2_float = utils.dequantize_ste(x2, self.input2_scale, self.input2_zero_point)
+        x1_float = self.input1_quant.dequantize(x1)
+        x2_float = self.input2_quant.dequantize(x2)
         # 2. Subtract
         output_float = ops.subtract(x1_float, x2_float)
         # 3. Fused activation
         output_float = utils.apply_fused_activation(output_float, self._fused_activation)
         # 4. Quantize to simulated INT8
-        return utils.quantize_ste(output_float, self.output_scale, self.output_zero_point)
+        return self.output_quant.quantize(output_float)
 
     def get_config(self):
         config = super().get_config()
@@ -158,21 +143,9 @@ class QuantizedSub(keras.Layer, types.Writable):
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
         """Return flatbuffer write instructions for the SUB layer."""
         quant_writes: list[types.QuantizationWriteOp] = []
-        quant_writes.append(
-            utils.make_quant_write_op(
-                op.input_indices[0], self.input1_scale, self.input1_zero_point
-            )
-        )
-        quant_writes.append(
-            utils.make_quant_write_op(
-                op.input_indices[1], self.input2_scale, self.input2_zero_point
-            )
-        )
-        quant_writes.append(
-            utils.make_quant_write_op(
-                op.output_indices[0], self.output_scale, self.output_zero_point
-            )
-        )
+        quant_writes.append(self.input1_quant.make_write_op(op.input_indices[0]))
+        quant_writes.append(self.input2_quant.make_write_op(op.input_indices[1]))
+        quant_writes.append(self.output_quant.make_write_op(op.output_indices[0]))
         return [], quant_writes
 
 

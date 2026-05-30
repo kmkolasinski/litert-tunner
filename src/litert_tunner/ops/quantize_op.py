@@ -43,25 +43,23 @@ class Dequantize(keras.Layer, types.Writable):
 
     def build(self, input_shape: ShapeLike) -> None:
         """Create scale and zero_point weights for the layer."""
-        self.scale = self.add_weight(
-            name="scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._initial_scale),
+        self.quant = utils.QuantizationVars(
+            self,
+            "",
+            self._initial_scale,
+            self._initial_zero_point,
             trainable=False,
         )
-        self.zero_point = self.add_weight(
-            name="zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._initial_zero_point),
-            trainable=False,
-        )
+        # Expose scale and zero_point for tests and backward compatibility
+        self.scale = self.quant.scale
+        self.zero_point = self.quant.zero_point
         super().build(input_shape)
 
     def call(self, x: TensorLike) -> TensorLike:
         """Dequantize input tensor."""
         if self._passthrough:
             return x
-        return utils.dequantize_ste(x, self.scale, self.zero_point)
+        return self.quant.dequantize(x)
 
     def get_config(self) -> dict[str, typing.Any]:
         """Return the configuration dictionary for serialization of the layer."""
@@ -92,7 +90,7 @@ class Dequantize(keras.Layer, types.Writable):
         if self._passthrough:
             return [], []
         input_tensor_idx = op.input_indices[0]
-        quant_write = utils.make_quant_write_op(input_tensor_idx, self.scale, self.zero_point)
+        quant_write = self.quant.make_write_op(input_tensor_idx)
         return [], [quant_write]
 
 
@@ -126,23 +124,21 @@ class Quantize(keras.Layer, types.Writable):
 
     def build(self, input_shape: ShapeLike) -> None:
         """Create scale and zero_point weights for the layer."""
-        self.scale = self.add_weight(
-            name="scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._initial_scale),
+        self.quant = utils.QuantizationVars(
+            self,
+            "",
+            self._initial_scale,
+            self._initial_zero_point,
             trainable=self._trainable_params,
         )
-        self.zero_point = self.add_weight(
-            name="zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._initial_zero_point),
-            trainable=self._trainable_params,
-        )
+        # Expose scale and zero_point for tests and backward compatibility
+        self.scale = self.quant.scale
+        self.zero_point = self.quant.zero_point
         super().build(input_shape)
 
     def call(self, x: TensorLike) -> TensorLike:
         """Quantize input to simulated INT8."""
-        return utils.quantize_ste(x, self.scale, self.zero_point)
+        return self.quant.quantize(x)
 
     def get_config(self) -> dict[str, typing.Any]:
         """Return the configuration dictionary for serialization of the layer."""
@@ -171,7 +167,7 @@ class Quantize(keras.Layer, types.Writable):
             A tuple of (buffer_writes, quantization_writes).
         """
         output_tensor_idx = op.output_indices[0]
-        quant_write = utils.make_quant_write_op(output_tensor_idx, self.scale, self.zero_point)
+        quant_write = self.quant.make_write_op(output_tensor_idx)
         return [], [quant_write]
 
 

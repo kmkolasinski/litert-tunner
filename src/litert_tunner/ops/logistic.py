@@ -41,30 +41,20 @@ class QuantizedLogistic(keras.Layer, types.Writable):
 
     def build(self, input_shape: ShapeLike) -> None:
         """Create quantization params."""
-        self.input_scale = self.add_weight(
-            name="input_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input_scale),
-            trainable=False,
-        )
-        self.input_zero_point = self.add_weight(
-            name="input_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input_zero_point),
+        self.input_quant = utils.QuantizationVars(
+            self,
+            "input",
+            self._input_scale,
+            self._input_zero_point,
             trainable=False,
         )
         # LOGISTIC output quantization is hardcoded in TFLite (scale=1/256, zp=-128)
         # So we keep it frozen.
-        self.output_scale = self.add_weight(
-            name="output_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._output_scale),
-            trainable=False,
-        )
-        self.output_zero_point = self.add_weight(
-            name="output_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._output_zero_point),
+        self.output_quant = utils.QuantizationVars(
+            self,
+            "output",
+            self._output_scale,
+            self._output_zero_point,
             trainable=False,
         )
         super().build(input_shape)
@@ -72,11 +62,11 @@ class QuantizedLogistic(keras.Layer, types.Writable):
     def call(self, x: TensorLike) -> TensorLike:
         """Forward pass simulating quantized LOGISTIC."""
         # 1. Dequantize
-        input_float = utils.dequantize_ste(x, self.input_scale, self.input_zero_point)
+        input_float = self.input_quant.dequantize(x)
         # 2. Sigmoid
         output_float = ops.sigmoid(input_float)
         # 3. Quantize to simulated INT8
-        return utils.quantize_ste(output_float, self.output_scale, self.output_zero_point)
+        return self.output_quant.quantize(output_float)
 
     def get_config(self):
         config = super().get_config()
@@ -96,14 +86,8 @@ class QuantizedLogistic(keras.Layer, types.Writable):
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
         """Return flatbuffer write instructions for the LOGISTIC layer."""
         quant_writes: list[types.QuantizationWriteOp] = []
-        quant_writes.append(
-            utils.make_quant_write_op(op.input_indices[0], self.input_scale, self.input_zero_point)
-        )
-        quant_writes.append(
-            utils.make_quant_write_op(
-                op.output_indices[0], self.output_scale, self.output_zero_point
-            )
-        )
+        quant_writes.append(self.input_quant.make_write_op(op.input_indices[0]))
+        quant_writes.append(self.output_quant.make_write_op(op.output_indices[0]))
         return [], quant_writes
 
 

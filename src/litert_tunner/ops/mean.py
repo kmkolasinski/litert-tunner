@@ -64,30 +64,20 @@ class QuantizedMean(keras.Layer, types.Writable):
     def build(self, input_shape: ShapeLike) -> None:
         """Create quantization params for the layer."""
         # Input quantization params (frozen)
-        self.input_scale = self.add_weight(
-            name="input_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input_scale),
-            trainable=False,
-        )
-        self.input_zero_point = self.add_weight(
-            name="input_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input_zero_point),
+        self.input_quant = utils.QuantizationVars(
+            self,
+            "input",
+            self._input_scale,
+            self._input_zero_point,
             trainable=False,
         )
 
         # Output quantization params (trainable)
-        self.output_scale = self.add_weight(
-            name="output_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._output_scale),
-            trainable=True,
-        )
-        self.output_zero_point = self.add_weight(
-            name="output_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._output_zero_point),
+        self.output_quant = utils.QuantizationVars(
+            self,
+            "output",
+            self._output_scale,
+            self._output_zero_point,
             trainable=True,
         )
 
@@ -103,13 +93,13 @@ class QuantizedMean(keras.Layer, types.Writable):
             Output tensor after mean reduction and fake-quantization.
         """
         # 1. Dequantize input
-        input_float = utils.dequantize_ste(x, self.input_scale, self.input_zero_point)
+        input_float = self.input_quant.dequantize(x)
 
         # 2. Compute mean over specified axes
         output = ops.mean(input_float, axis=self._axis, keepdims=self._keep_dims)
 
         # 3. Quantize output to simulated INT8
-        return utils.quantize_ste(output, self.output_scale, self.output_zero_point)
+        return self.output_quant.quantize(output)
 
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
@@ -142,14 +132,8 @@ class QuantizedMean(keras.Layer, types.Writable):
             A tuple of (buffer_writes, quantization_writes).
         """
         quant_writes: list[types.QuantizationWriteOp] = []
-        quant_writes.append(
-            utils.make_quant_write_op(op.input_indices[0], self.input_scale, self.input_zero_point)
-        )
-        quant_writes.append(
-            utils.make_quant_write_op(
-                op.output_indices[0], self.output_scale, self.output_zero_point
-            )
-        )
+        quant_writes.append(self.input_quant.make_write_op(op.input_indices[0]))
+        quant_writes.append(self.output_quant.make_write_op(op.output_indices[0]))
         return [], quant_writes
 
 

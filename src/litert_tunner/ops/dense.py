@@ -94,46 +94,29 @@ class QuantizedDense(keras.Layer, types.Writable):
         )
 
         # Input quantization params (frozen)
-        self.input_scale = self.add_weight(
-            name="input_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input_scale),
-            trainable=False,
-        )
-        self.input_zero_point = self.add_weight(
-            name="input_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._input_zero_point),
+        self.input_quant = utils.QuantizationVars(
+            self,
+            "input",
+            self._input_scale,
+            self._input_zero_point,
             trainable=False,
         )
 
         # Weight quantization params (frozen)
-        weight_scale_arr = np.asarray(self._weight_scale)
-        self.weight_scale = self.add_weight(
-            name="weight_scale",
-            shape=weight_scale_arr.shape,
-            initializer=keras.initializers.Constant(typing.cast("float", weight_scale_arr)),
-            trainable=False,
-        )
-        weight_zp_arr = np.asarray(self._weight_zero_point)
-        self.weight_zero_point = self.add_weight(
-            name="weight_zero_point",
-            shape=weight_zp_arr.shape,
-            initializer=keras.initializers.Constant(typing.cast("float", weight_zp_arr)),
+        self.weight_quant = utils.QuantizationVars(
+            self,
+            "weight",
+            self._weight_scale,
+            self._weight_zero_point,
             trainable=False,
         )
 
         # Output quantization params (trainable)
-        self.output_scale = self.add_weight(
-            name="output_scale",
-            shape=(),
-            initializer=keras.initializers.Constant(self._output_scale),
-            trainable=True,
-        )
-        self.output_zero_point = self.add_weight(
-            name="output_zero_point",
-            shape=(),
-            initializer=keras.initializers.Constant(self._output_zero_point),
+        self.output_quant = utils.QuantizationVars(
+            self,
+            "output",
+            self._output_scale,
+            self._output_zero_point,
             trainable=True,
         )
 
@@ -150,11 +133,11 @@ class QuantizedDense(keras.Layer, types.Writable):
             Output tensor after fake-quantized dense computation.
         """
         # 1. Dequantize input: float = scale * (int8 - zero_point)
-        input_float = utils.dequantize_ste(x, self.input_scale, self.input_zero_point)
+        input_float = self.input_quant.dequantize(x)
 
         # 2. Dequantize weights: float = scale * (int8 - zero_point)
-        scale_expanded = utils.expand_dims_if_not_scalar(self.weight_scale, 1)
-        zp_expanded = utils.expand_dims_if_not_scalar(self.weight_zero_point, 1)
+        scale_expanded = utils.expand_dims_if_not_scalar(self.weight_quant.scale, 1)
+        zp_expanded = utils.expand_dims_if_not_scalar(self.weight_quant.zero_point, 1)
         weight_float = utils.dequantize_ste(self.weight_int8, scale_expanded, zp_expanded)
 
         # 3. Matmul + bias (in float32, simulating INT32 accumulation)
@@ -168,7 +151,7 @@ class QuantizedDense(keras.Layer, types.Writable):
         # We use quantize_ste (not _fake_quantize) so the output stays in simulated
         # INT8 space. This ensures the next layer's dequantize step works correctly,
         # and the final DEQUANTIZE op converts back to float32.
-        return utils.quantize_ste(output, self.output_scale, self.output_zero_point)
+        return self.output_quant.quantize(output)
 
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
@@ -221,7 +204,7 @@ class QuantizedDense(keras.Layer, types.Writable):
         bias_index = 2
         if len(op_inputs) > bias_index and op_inputs[bias_index] >= 0:
             bias_int32 = utils.quantize_bias_to_int32(
-                self.bias, self.input_scale, self.weight_scale
+                self.bias, self.input_quant.scale, self.weight_quant.scale
             )
             buffer_writes.append(
                 types.BufferWriteOp(tensor_index=op_inputs[2], data=bytes(bias_int32.tobytes()))
@@ -229,16 +212,10 @@ class QuantizedDense(keras.Layer, types.Writable):
 
         # Write quantization params
         input_tensor_idx = op_inputs[0]
-        quant_writes.append(
-            utils.make_quant_write_op(input_tensor_idx, self.input_scale, self.input_zero_point)
-        )
-        quant_writes.append(
-            utils.make_quant_write_op(weight_tensor_idx, self.weight_scale, self.weight_zero_point)
-        )
+        quant_writes.append(self.input_quant.make_write_op(input_tensor_idx))
+        quant_writes.append(self.weight_quant.make_write_op(weight_tensor_idx))
         output_tensor_idx = op_outputs[0]
-        quant_writes.append(
-            utils.make_quant_write_op(output_tensor_idx, self.output_scale, self.output_zero_point)
-        )
+        quant_writes.append(self.output_quant.make_write_op(output_tensor_idx))
 
         return buffer_writes, quant_writes
 

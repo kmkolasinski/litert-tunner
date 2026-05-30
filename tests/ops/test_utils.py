@@ -231,7 +231,7 @@ def test__fake_quantize():
 
     with tf.GradientTape() as tape:
         tape.watch(x)
-        y = utils._fake_quantize(x, scale, zero_point)
+        y = utils.fake_quantize(x, scale, zero_point)
 
     # Replicate forward
     q = np.clip(np.round(_to_numpy(x) / scale) + zero_point, -128.0, 127.0)
