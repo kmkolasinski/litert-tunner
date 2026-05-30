@@ -7,7 +7,7 @@ import keras
 import numpy as np
 
 import litert_tunner
-from tests.conftest import export_quantized_tflite_model
+from tests import conftest
 
 
 def test__mul_with_constant_input(temp_model_dir: Path, run_interpreter: Callable):
@@ -18,7 +18,7 @@ def test__mul_with_constant_input(temp_model_dir: Path, run_interpreter: Callabl
     model = keras.Model(inputs=inputs, outputs=x)
 
     model_path = temp_model_dir / "mul_constant.tflite"
-    export_quantized_tflite_model((4,), model, float_io=True, output_path=model_path)
+    conftest.export_quantized_tflite_model((4,), model, float_io=True, output_path=model_path)
 
     rng = np.random.default_rng(42)
     x_test = rng.uniform(-1.0, 1.0, (5, 4)).astype(np.float32)
@@ -37,7 +37,7 @@ def test__add_with_constant_input(temp_model_dir: Path, run_interpreter: Callabl
     model = keras.Model(inputs=inputs, outputs=x)
 
     model_path = temp_model_dir / "add_constant.tflite"
-    export_quantized_tflite_model((4,), model, float_io=True, output_path=model_path)
+    conftest.export_quantized_tflite_model((4,), model, float_io=True, output_path=model_path)
 
     rng = np.random.default_rng(42)
     x_test = rng.uniform(-1.0, 1.0, (5, 4)).astype(np.float32)
