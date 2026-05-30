@@ -93,6 +93,23 @@ litert_tunner.save_model(tunner_model, "model_int8_finetuned.tflite")
 - **Gradients** flow through float32 parameters only. Straight-Through
   Estimator (STE) may be used where needed for rounding operations.
 
+#### Why Not Use Keras 3 Built-in Quantization?
+
+Keras 3 has its own quantization API (`model.quantize("int8")`), but it is
+**NOT suitable** for this project because:
+
+- It uses **symmetric quantization** (scale only, no zero-point) — TFLite uses
+  **affine quantization** (scale + zero-point).
+- It's **one-way PTQ** — Keras explicitly states: "you cannot train a model
+  after quantizing it to INT8."
+- It operates on **Keras model weights**, not TFLite flatbuffer graphs.
+- It uses **dynamic AbsMax** activation scaling at runtime, whereas TFLite
+  pre-computes fixed activation ranges during calibration.
+
+Our library does the opposite: we take an already-quantized TFLite graph and
+make it trainable again by wrapping the integer arithmetic in differentiable
+simulation layers.
+
 ### 4.2 Quantization Formulas
 
 All fake-quant simulation is based on the standard TFLite affine quantization
@@ -280,7 +297,63 @@ tests/
   `pyproject.toml`).
 - **No magic numbers** — use named constants or enums.
 
-### 6.2 Keras 3 Backend-Agnostic Code
+### 6.2 Import Style (Google-style)
+
+Use **Google-style imports** throughout the project. Import modules, not
+individual symbols from modules.
+
+```python
+# ✅ Correct — import the module, use dotted access
+from litert_tunner import flatbuffer
+from litert_tunner import graph
+
+graph_def = flatbuffer.parse_tflite("model.tflite")
+model = graph.build_keras_model(graph_def)
+flatbuffer.save_tflite(model, "out.tflite")
+
+# ✅ Also correct — import submodule
+from litert_tunner.graph import types
+tensor = types.TensorInfo(...)
+
+# ❌ Wrong — importing symbols directly
+from litert_tunner.flatbuffer.parser import parse_tflite  # NO
+from litert_tunner.graph.types import TensorInfo  # NO
+```
+
+Each package's `__init__.py` must re-export the public API of its submodules
+so that `from litert_tunner import flatbuffer` then `flatbuffer.parse_tflite()`
+works. Keep `__init__.py` files minimal — only re-exports, no logic.
+
+### 6.3 Test Naming Convention
+
+All test functions must use a **double underscore** prefix to visually separate
+the `test` keyword from the descriptive name:
+
+```python
+# ✅ Correct
+def test__dense_output_matches_interpreter(): ...
+def test__load_save_identity(): ...
+def test__quantize_dequantize_roundtrip(): ...
+
+# ❌ Wrong — single underscore
+def test_dense_output_matches_interpreter(): ...
+```
+
+### 6.4 Dataclass Style
+
+Use `frozen=True` for all immutable data containers (graph types, quantization
+params, tensor info, etc.). Only use mutable dataclasses when mutation is
+explicitly required.
+
+```python
+@dataclass(frozen=True)
+class QuantizationParams:
+    scales: np.ndarray
+    zero_points: np.ndarray
+    quantized_dimension: int
+```
+
+### 6.5 Keras 3 Backend-Agnostic Code
 
 The tunner model must be **backend-agnostic** using Keras 3:
 
@@ -301,7 +374,7 @@ The tunner model must be **backend-agnostic** using Keras 3:
   import tensorflow as tf
   ```
 
-### 6.3 Dependencies
+### 6.6 Dependencies
 
 Core dependencies (in `pyproject.toml`):
 
@@ -320,7 +393,7 @@ Test / dev dependencies:
 
 Keep the dependency footprint minimal. Do not add unnecessary libraries.
 
-### 6.4 Environment
+### 6.7 Environment
 
 - **Always check** the active conda environment before running any Python code,
   tests, or scripts: `echo $CONDA_DEFAULT_ENV`.
@@ -409,3 +482,8 @@ checklist:
   `keras.ops` for backend-agnostic compatibility.
 - **Do not use `flatc` CLI or JSON conversion for flatbuffer I/O.** Use the
   `tflite` Python package with the Object API for programmatic read/write.
+- **Do not use Keras 3 built-in quantization API.** It uses symmetric
+  quantization, is one-way PTQ (not trainable), and doesn't parse TFLite
+  flatbuffers. Our library has fundamentally different goals.
+- **Do not import symbols directly from submodules.** Use Google-style imports
+  (import the module, use dotted access).
