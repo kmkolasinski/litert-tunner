@@ -91,24 +91,8 @@ litert_tunner.save_model(tunner_model, "model_int8_finetuned.tflite")
 - **Fake quantization nodes** simulate quantize → dequantize round-trips so
   forward pass matches the integer arithmetic of the real graph.
 - **Gradients** flow through float32 parameters only. Straight-Through
-  Estimator (STE) may be used where needed for rounding operations.
-
-#### Why Not Use Keras 3 Built-in Quantization?
-
-Keras 3 has its own quantization API (`model.quantize("int8")`), but it is
-**NOT suitable** for this project because:
-
-- It uses **symmetric quantization** (scale only, no zero-point) — TFLite uses
-  **affine quantization** (scale + zero-point).
-- It's **one-way PTQ** — Keras explicitly states: "you cannot train a model
-  after quantizing it to INT8."
-- It operates on **Keras model weights**, not TFLite flatbuffer graphs.
-- It uses **dynamic AbsMax** activation scaling at runtime, whereas TFLite
-  pre-computes fixed activation ranges during calibration.
-
-Our library does the opposite: we take an already-quantized TFLite graph and
-make it trainable again by wrapping the integer arithmetic in differentiable
-simulation layers.
+  Estimator (STE) is used for rounding and clipping operations (see
+  `ops/utils.py`: `quantize_ste`, `dequantize_ste`).
 
 ### 4.2 Quantization Formulas
 
@@ -127,20 +111,6 @@ real_value = scale * (int8_value - zero_point)
 int8_value = clamp(round(real_value / scale) + zero_point, -128, 127)
 ```
 
-**Fully-Connected / Conv2D integer arithmetic:**
-
-```text
-# Accumulation in INT32:
-acc_int32 = sum(input_int8[i] * weight_int8[i]) + bias_int32
-
-# Requantize to output INT8:
-# multiplier = input_scale * weight_scale / output_scale
-# This is computed as a fixed-point multiply + shift in real TFLite,
-# but in fake-quant simulation we use float32:
-output_float = acc_int32 * (input_scale * weight_scale / output_scale)
-output_int8 = clamp(round(output_float) + output_zero_point, -128, 127)
-```
-
 **Per-channel vs per-tensor quantization:**
 
 - **Activations**: Always per-tensor (one scale, one zero-point per tensor).
@@ -152,15 +122,16 @@ output_int8 = clamp(round(output_float) + output_zero_point, -128, 127)
 ### 4.3 Fused Activations
 
 TFLite commonly fuses activations into the preceding op (e.g., `Conv2D+ReLU`
-is a single op with `fused_activation_function=RELU`). In the quantized graph,
-the activation is applied **in the INT32 accumulator space before
-requantization** to INT8. The fake-quant simulation must replicate this order:
+is a single op with `fused_activation_function=RELU`). Supported fused
+activations are defined in `ops/utils.py` as constants:
 
-```text
-1. Compute INT32 accumulator (dot product + bias)
-2. Apply fused activation (e.g., ReLU clamp in INT32 space)
-3. Requantize to output INT8
-```
+- `FUSED_ACTIVATION_NONE = 0`
+- `FUSED_ACTIVATION_RELU = 1`
+- `FUSED_ACTIVATION_RELU_N1_TO_1 = 2`
+- `FUSED_ACTIVATION_RELU6 = 3`
+
+The `apply_fused_activation()` helper applies the activation after the
+accumulation and before requantization.
 
 ### 4.4 Flatbuffer Handling
 
@@ -170,68 +141,71 @@ requantization** to INT8. The fake-quant simulation must replicate this order:
   zero-points) in the existing flatbuffer. **Never modify the graph topology**
   — this guarantees the output file is always a valid LiteRT model.
 
-#### Flatbuffer Read/Write Strategy
+Uses the **`tflite` PyPI package** with the Object API (`Model`) for
+programmatic parse → modify → re-serialize, entirely in Python.
 
-For parsing and modifying `.tflite` files, use the **`tflite` PyPI package**
-which provides pre-generated Python classes from the TFLite FlatBuffer schema.
-This allows programmatic parsing → modification → re-serialization entirely in
-Python.
+### 4.5 Supported Operations
 
-**Why this approach (not JSON via `flatc`):**
+Currently implemented operations (one file per op in `src/litert_tunner/ops/`):
 
-| Approach                                            | Verdict                 | Reason                                                                                                                             |
-| --------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `flatc` JSON round-trip                             | ❌ Rejected             | Requires external `flatc` binary (not pip-installable), bloats large weight buffers into massive JSON, schema versioning fragility |
-| Binary surgery (overwrite bytes at offsets)         | ⚠️ Possible but fragile | Fast and topology-preserving, but requires offset tracking and is error-prone                                                      |
-| **`tflite` Python package (parse → modify → Pack)** | ✅ Recommended          | Pure Python, pip-installable, uses Object API (`ModelT`) for clean read-modify-write, no external tools needed                     |
+| Op file             | TFLite op type(s)                      | Writable | Notes                             |
+| ------------------- | -------------------------------------- | -------- | --------------------------------- |
+| `dense.py`          | `FULLY_CONNECTED`                      | ✅       | Per-tensor weight quant           |
+| `conv2d.py`         | `CONV_2D`                              | ✅       | Per-channel weight quant          |
+| `depthwise_conv2d.py` | `DEPTHWISE_CONV_2D`                  | ✅       | Per-channel weight quant          |
+| `add.py`            | `ADD`                                  | ✅       | Requantizes both inputs           |
+| `mul.py`            | `MUL`                                  | ✅       | Requantizes both inputs           |
+| `logistic.py`       | `LOGISTIC`                             | ✅       | Sigmoid activation                |
+| `mean.py`           | `MEAN`                                 | ✅       | Reduce mean                       |
+| `quantize_op.py`    | `QUANTIZE`, `DEQUANTIZE`               | ✅       | Quantize/dequantize passthrough   |
+| `pool.py`           | `MAX_POOL_2D`, `AVERAGE_POOL_2D`       | ❌       | No trainable params               |
+| `reshape.py`        | `RESHAPE`                              | ❌       | Static or dynamic shape           |
+| `pack.py`           | `PACK`                                 | ❌       | Constant tensor packing           |
+| `shape_op.py`       | `SHAPE`                                | ❌       | Returns tensor shape              |
+| `strided_slice.py`  | `STRIDED_SLICE`                        | ❌       | Tensor slicing                    |
 
-**Workflow:**
+**Adding a new op:**
 
-```python
-import tflite.Model
-import flatbuffers
+1. Create `src/litert_tunner/ops/<op_name>.py` with a `keras.Layer` subclass.
+2. Decorate the builder function with `@registry.register_op("OP_TYPE")`.
+3. Add the import to `src/litert_tunner/ops/__init__.py`.
+4. Write tests in `tests/ops/test_<op_name>.py`.
 
-# 1. Parse
-with open("model.tflite", "rb") as f:
-    buf = bytearray(f.read())
-model_obj = tflite.Model.Model.GetRootAs(buf, 0)
-model = tflite.Model.ModelT.InitFromObj(model_obj)  # Mutable object
+Ops that persist parameters must implement the `Writable` protocol (see
+`graph/types.py`) and its `collect_write_ops()` method. Passthrough ops
+(reshape, pooling, etc.) do not implement `Writable`.
 
-# 2. Modify buffer data (e.g., update bias values)
-model.buffers[bias_buffer_idx].data = new_bias_bytes
+### 4.6 Op Implementation Pattern
 
-# 3. Re-serialize
-builder = flatbuffers.Builder(len(buf))
-model_offset = model.Pack(builder)
-builder.Finish(model_offset)
-new_buf = builder.Output()
+Each quantized op follows the same pattern:
 
-with open("modified.tflite", "wb") as f:
-    f.write(bytes(new_buf))
-```
+1. **Keras Layer class** (`QuantizedDense`, `QuantizedConv2D`, etc.):
+   - `__init__`: Stores raw numpy data for weights, bias, and quant params.
+   - `build`: Creates Keras weights via `self.add_weight(...)` — frozen for
+     INT8 data, trainable for bias/scales/zero-points.
+   - `call`: Dequantize inputs → compute in float32 → apply fused activation
+     → quantize output (using STE for gradient flow).
+   - `collect_write_ops`: Returns `BufferWriteOp` and `QuantizationWriteOp`
+     instructions for the flatbuffer writer.
 
-**Important**: Ensure the `tflite` package version matches the TensorFlow
-version used to create the model. Pin versions in `pyproject.toml`.
+2. **Builder function** (decorated with `@registry.register_op`):
+   - Extracts tensors, quantization params, and options from `OperatorInfo`.
+   - Uses shared helpers from `ops/utils.py` (e.g., `get_bias_float32`,
+     `get_quant_param_value`, `apply_fused_activation`).
+   - Returns a configured layer instance.
 
-### 4.5 Supported Operations (Incremental)
+### 4.7 Shared Utilities (`ops/utils.py`)
 
-Agents will add support for operations incrementally. Start with the simplest
-ops and expand over time:
+Key functions used across all op implementations:
 
-1. **Phase 1 — Bootstrap**: Full infrastructure + `FullyConnected` (Dense)
-   with no activation. The simplest possible model: a single `Dense(1)` layer,
-   INT8 in / INT8 out. Get this matching bit-for-bit before anything else.
-1. **Phase 1b — Activations**: Add fused activation support (ReLU, ReLU6).
-   Test with `Dense(..., activation="relu")`.
-1. **Phase 2 — Convolutions**: Conv2D, DepthwiseConv2D (per-channel quant).
-1. **Phase 3 — Pooling & Reshape**: MaxPool2D, AveragePool2D, Reshape, Flatten.
-1. **Phase 4 — Normalization & Skip**: BatchNormalization (fused), Add
-   (residual connections — requires input requantization).
-1. **Phase 5 — Advanced**: Softmax (fixed-point LUT — hard to match exactly),
-   Concatenation, Transpose, Pad, etc.
-
-Each new operation must include its own unit tests before being considered
-complete.
+- `dequantize_ste` / `quantize_ste` / `_fake_quantize` — STE-based quant/dequant
+- `apply_fused_activation` — TFLite fused activation dispatch
+- `get_bias_float32` — Extract and dequantize INT32 bias to float32
+- `get_quant_param_value` — Extract scalar or array quant params
+- `expand_dims_if_not_scalar` — Reshape for per-channel broadcasting
+- `quantize_to_int8` / `quantize_bias_to_int32` — Convert back for writing
+- `make_quant_write_op` / `to_float_list` / `to_int_list` — Write-op helpers
+- `compute_requantize_multiplier` — `(input_scale * weight_scale) / output_scale`
 
 ## 5. Architecture & Code Organization
 
@@ -239,51 +213,71 @@ complete.
 src/litert_tunner/
 ├── __init__.py              # Public API: load_model, save_model
 ├── flatbuffer/              # Flatbuffer parsing & serialization
-│   ├── __init__.py
-│   ├── parser.py            # Parse .tflite into internal graph representation
+│   ├── __init__.py          # Re-exports parse_tflite, save_tflite
+│   ├── parser.py            # Parse .tflite → GraphDef
 │   └── writer.py            # Write updated params back to .tflite
 ├── graph/                   # Internal graph representation
-│   ├── __init__.py
-│   ├── types.py             # Dataclasses: TensorInfo, OperatorInfo, GraphDef
-│   └── builder.py           # Convert GraphDef → Keras model
-├── ops/                     # Operation registry & implementations
-│   ├── __init__.py
-│   ├── registry.py          # Op name → builder function mapping
-│   ├── dense.py             # FullyConnected implementation
-│   ├── conv2d.py            # Conv2D implementation
-│   └── ...                  # One file per op (or family of ops)
-├── quantization/            # Fake-quant simulation layers
-│   ├── __init__.py
-│   ├── fake_quant.py        # Keras layers for quantize/dequantize
-│   └── numerics.py          # Int8 arithmetic helpers
-└── utils.py                 # Shared utilities
+│   ├── __init__.py          # Re-exports types and build_keras_model
+│   ├── types.py             # TensorInfo, OperatorInfo, GraphDef, Writable protocol
+│   └── builder.py           # Convert GraphDef → Keras Functional model
+└── ops/                     # Operation registry & implementations
+    ├── __init__.py           # Imports all ops to trigger registration
+    ├── registry.py           # @register_op decorator, get_op_builder()
+    ├── utils.py              # Shared helpers: STE quant/dequant, fused activation, etc.
+    ├── dense.py              # FULLY_CONNECTED
+    ├── conv2d.py             # CONV_2D
+    ├── depthwise_conv2d.py   # DEPTHWISE_CONV_2D
+    ├── add.py                # ADD
+    ├── mul.py                # MUL
+    ├── logistic.py           # LOGISTIC
+    ├── mean.py               # MEAN
+    ├── quantize_op.py        # QUANTIZE, DEQUANTIZE
+    ├── pool.py               # MAX_POOL_2D, AVERAGE_POOL_2D
+    ├── reshape.py            # RESHAPE
+    ├── pack.py               # PACK
+    ├── shape_op.py           # SHAPE
+    └── strided_slice.py      # STRIDED_SLICE
 ```
 
 ```text
 tests/
-├── test_flatbuffer_parser.py
-├── test_flatbuffer_writer.py
-├── test_graph_builder.py
-├── test_ops/
-│   ├── test_dense.py
-│   ├── test_conv2d.py
-│   └── ...
-├── test_quantization.py
-├── test_load_save_roundtrip.py
-└── test_finetuning_e2e.py
+├── conftest.py              # Shared fixtures: make_dense_tflite, make_mlp_tflite,
+│                            #   make_resnet_tflite, make_efficientnetb0_tflite,
+│                            #   run_interpreter, export_quantized_tflite_model
+├── test_load_save_roundtrip.py  # Load → save → verify bit-exact identity
+├── test_finetuning_e2e.py       # Fine-tune bias → verify loss decreases → save/reload
+├── flatbuffer/
+│   ├── test_parser.py       # Flatbuffer parser unit tests
+│   ├── test_writer.py       # Flatbuffer writer unit tests
+│   └── test_parse_write.py  # Parser + writer integration tests
+├── ops/
+│   ├── op_test_utils.py     # Test helpers: make_tensor, build_and_call, assertions
+│   ├── test_utils.py        # Tests for ops/utils.py helpers
+│   ├── test_dense.py        # FullyConnected unit tests
+│   ├── test_conv2d.py       # Conv2D unit tests
+│   ├── test_depthwise_conv2d.py  # DepthwiseConv2D unit tests
+│   ├── test_add.py          # Add unit tests
+│   ├── test_mul.py          # Mul unit tests
+│   ├── test_logistic.py     # Logistic unit tests
+│   ├── test_mean.py         # Mean unit tests
+│   ├── test_pool.py         # Pool unit tests
+│   ├── test_quantize_op.py  # Quantize/Dequantize unit tests
+│   └── test_passthrough_ops.py  # Reshape, Pack, Shape, StridedSlice tests
+└── networks/
+    ├── test_mlp.py          # Multi-layer MLP forward-pass tests
+    ├── test_resnet.py       # ResNet-like CNN forward-pass tests
+    └── test_efficientnet.py # EfficientNetB0 forward-pass test
 ```
 
 ### Design Principles
 
-- **Modular**: Each op is a self-contained module. Adding a new op should
-  require no changes to existing modules — only registering it in the registry.
+- **Modular**: Each op is a self-contained module. Adding a new op requires
+  only: create the file, decorate with `@register_op`, add import to
+  `ops/__init__.py`.
 - **Composable**: The graph builder composes Keras layers from the op registry.
   Operations are independent building blocks.
-- **Easy to extend**: The `ops/registry.py` pattern makes it trivial for an
-  agent to add a new op: implement a builder function, register it, add tests.
 - **Clean separation of concerns**: Flatbuffer I/O knows nothing about Keras.
-  The graph builder knows nothing about flatbuffers. Quantization layers are
-  reusable.
+  The graph builder knows nothing about flatbuffers.
 
 ## 6. Coding Standards
 
@@ -294,9 +288,11 @@ tests/
 - **Docstrings** — Google-style docstrings on all public functions and classes.
 - **Line length** — 100 characters max (configured in `ruff`).
 - **Linting** — must pass `ruff check` and `ruff format` (configured in
-  `pyproject.toml`).
+  `pyproject.toml`). Use `ALL` rule selection with explicit ignores.
 - **No magic numbers** — use named constants or enums.
-- **Random number generation** — always use the modern `np.random.default_rng(seed)` API to create a `Generator` instance for random arrays (e.g. `rng.uniform(...)`), and avoid legacy APIs like `np.random.seed` and `np.random.uniform` to prevent `NPY002` violations.
+- **Random number generation** — always use the modern
+  `np.random.default_rng(seed)` API to create a `Generator` instance
+  (e.g. `rng.uniform(...)`). Avoid legacy `np.random.seed` / `np.random.uniform`.
 
 ### 6.2 Import Style (Google-style)
 
@@ -366,9 +362,9 @@ The tunner model must be **backend-agnostic** using Keras 3:
 - **Use `keras.Layer`** subclasses for custom layers (fake-quant nodes, op
   implementations).
 
-- **TF-specific code is allowed only in tests** — for `tf.lite.Interpreter`,
-  `tf.lite.TFLiteConverter`, and test model export. These should be isolated
-  in test utilities.
+- **TF-specific code is allowed only in tests** — for `tf.lite.TFLiteConverter`
+  and test model export. Use `ai_edge_litert.interpreter.Interpreter` for
+  inference in tests.
 
 - **Import pattern**:
 
@@ -379,6 +375,7 @@ The tunner model must be **backend-agnostic** using Keras 3:
 
   # ✅ Test code only
   import tensorflow as tf
+  from ai_edge_litert.interpreter import Interpreter
   ```
 
 ### 6.6 Dependencies
@@ -387,16 +384,15 @@ Core dependencies (in `pyproject.toml`):
 
 - `keras >= 3.0` — model building and training (backend-agnostic)
 - `numpy` — numerical operations
-- `tflite` — TFLite FlatBuffer schema parsing (pre-generated Python classes)
+- `tflite >= 2.18.0` — TFLite FlatBuffer schema parsing
 - `flatbuffers` — FlatBuffer serialization/deserialization
 
 Test / dev dependencies:
 
-- `tensorflow` — for `tf.lite.Interpreter` and `tf.lite.TFLiteConverter`
-  (used in tests only)
-- `ai-edge-litert` — modern LiteRT runtime (alternative to `tflite-runtime`,
-  use `from ai_edge_litert.interpreter import Interpreter`)
-- `pytest`, `ruff`, etc. — already configured
+- `tensorflow >= 2.18.0` — for `tf.lite.TFLiteConverter` (tests only)
+- `ai-edge-litert` — LiteRT runtime (`Interpreter`)
+- `pytest`, `pytest-xdist`, `pytest-forked`, `pytest-cov`, `pytest-randomly`,
+  `pytest-dotenv`, `ruff`, etc.
 
 Keep the dependency footprint minimal. Do not add unnecessary libraries.
 
@@ -404,64 +400,110 @@ Keep the dependency footprint minimal. Do not add unnecessary libraries.
 
 - **Always check** the active environment before running any Python code,
   tests, or scripts.
-- All tests and Python commands should be run within the virtual environment activated using `source .venv/bin/activate`.
-- If using conda, check the active conda environment with `echo $CONDA_DEFAULT_ENV`.
+- All tests and Python commands should be run within the virtual environment
+  activated using `source .venv/bin/activate`.
 - If the environment is not clear, ask the user.
 - **Command Execution Rules**:
-  - **Tooling**: The project uses `uv` for package/environment management. Do not assume `pip` or `.venv/bin/pip` is present; use `uv pip` instead.
-  - **Testing**: Always run tests using `.venv/bin/python -m pytest <path_to_test>` rather than directly invoking `.venv/bin/pytest` or `pytest`. This guarantees that Python resolves the root `tests` module correctly without raising `ModuleNotFoundError`.
-  - **Type Checking (Pyright)**: Pyright is run via Node/npm. Always run it non-interactively using `npx -y pyright` to prevent blocking on interactive npm prompts. To configure it to use the project's virtual environment, pass the `--pythonpath .venv/bin/python` argument (do not use `--venv`).
+  - **Tooling**: The project uses `uv` for package/environment management.
+    Do not assume `pip` or `.venv/bin/pip` is present; use `uv pip` instead.
+  - **Testing**: Always run tests using
+    `.venv/bin/python -m pytest <path_to_test>` rather than directly invoking
+    `.venv/bin/pytest` or `pytest`. This guarantees that Python resolves the
+    root `tests` module correctly without raising `ModuleNotFoundError`.
+  - **Type Checking (Pyright)**: Pyright is run via Node/npm. Always run it
+    non-interactively using `npx -y pyright` to prevent blocking on interactive
+    npm prompts. To configure it to use the project's virtual environment, pass
+    the `--pythonpath .venv/bin/python` argument (do not use `--venv`).
 
 ## 7. Testing Pipeline
 
-Every feature must be validated by the following pipeline. Tests can (and
-should) be split into independent steps.
+### 7.1 Test Fixtures (in `tests/conftest.py`)
 
-### 7.1 Unit Tests (per operation)
+Tests use pytest fixtures to generate quantized TFLite models on the fly:
 
-For each new op, the agent must:
+- **`make_dense_tflite`** — creates a single Dense layer model.
+- **`make_mlp_tflite`** — creates multi-layer MLPs with optional skip
+  connections, batch normalization, and various activations.
+- **`make_resnet_tflite`** — creates ResNet-like CNN models with Conv2D,
+  residual connections, pooling, and batch normalization.
+- **`make_efficientnetb0_tflite`** — creates an EfficientNetB0-based model.
+- **`run_interpreter`** — runs a `.tflite` model through the LiteRT Interpreter
+  and returns outputs. Handles INT8/float32 input type conversion.
+- **`export_quantized_tflite_model`** — helper that converts a Keras model to
+  a fully-quantized INT8 TFLite model using `tf.lite.TFLiteConverter` with
+  a representative dataset.
 
-1. **Define a minimal Keras model** using that op (e.g., a single Dense layer).
-1. **Export it** to LiteRT INT8 using `tf.lite.TFLiteConverter` with
-   representative dataset calibration.
-1. **Load it** with `litert_tunner.load_model()`.
-1. **Compare outputs**: `tunner_model.predict(inputs)` vs
-   `tf.lite.Interpreter` — must match within numerical noise
-   (typically `atol=1, rtol=0` for int8 output comparison, or appropriate
-   tolerance for float comparisons).
+### 7.2 Op-Level Tests (`tests/ops/`)
 
-### 7.2 Load/Save Round-trip
+Each op has unit tests that verify the builder, layer call, trainable weights,
+and `Writable` protocol. The shared framework `tests/ops/op_test_utils.py`
+provides:
 
-1. Load a `.tflite` model with `litert_tunner.load_model()`.
-1. Save it back with `litert_tunner.save_model()` (no fine-tuning).
-1. Load the saved model with `tf.lite.Interpreter`.
-1. Compare outputs to the original — must be **bit-exact identical**.
+- `make_tensor`, `make_operator`, `make_quant_params` — fixture factories
+- `build_and_call` — build from registry + call in one step
+- `assert_trainable_weight_names` / `assert_non_trainable_weight_names`
+- `assert_layer_is_writable` / `assert_layer_not_writable`
+- `assert_collect_write_ops` — verify write-op counts and tensor indices
 
-### 7.3 Fine-tuning Smoke Test
+### 7.3 Network-Level Forward-Pass Tests (`tests/networks/`)
 
-1. Train a small Keras model → export INT8.
-1. Load with `litert_tunner.load_model()`.
-1. Measure initial gap: `|tunner_model.predict(x) - original_model.predict(x)|`.
-1. Fine-tune the tunner model using the original model outputs as targets.
-1. Verify the gap decreases.
-1. Save and re-load — verify the saved model also shows the improved gap.
+These are the primary correctness tests. The pattern for every network test:
 
-### 7.4 Running Tests
+```python
+def test__mlp_single_layer_forward(make_mlp_tflite, run_interpreter):
+    # 1. Create a quantized TFLite model via fixture
+    model_path = make_mlp_tflite(input_size=4, hidden_sizes=[8], ...)
+
+    # 2. Run inference through the LiteRT Interpreter
+    litert_outputs = run_interpreter(model_path, x_train)
+
+    # 3. Load with litert_tunner and run Keras prediction
+    keras_model = litert_tunner.load_model(str(model_path))
+    keras_outputs = keras_model.predict(x_train)
+
+    # 4. Compare — forward propagation must match within tolerance
+    np.testing.assert_allclose(litert_outputs, keras_outputs, atol=1e-3)
+
+    # 5. Save and verify round-trip
+    litert_tunner.save_model(keras_model, str(model_path))
+    litert_saved_outputs = run_interpreter(model_path, x_train)
+    np.testing.assert_allclose(keras_outputs, litert_saved_outputs, atol=1e-3)
+```
+
+Key points:
+- **Forward propagation comparison** between the Keras model output and the
+  LiteRT Interpreter output is the primary validation method.
+- Typical tolerance: `atol=1e-3` for float I/O models.
+- Every test also verifies the **save round-trip**: save the model back to
+  `.tflite`, re-run through the Interpreter, confirm outputs still match.
+
+### 7.4 Integration Tests
+
+- **`test_load_save_roundtrip.py`** — Verifies load → save → reload produces
+  **bit-exact identical** outputs. Also tests that manual parameter modification
+  (e.g., shifting bias) results in a valid, loadable `.tflite` file.
+- **`test_finetuning_e2e.py`** — End-to-end smoke test: load model → freeze
+  all params except bias → fine-tune on shifted targets → verify loss decreases
+  → save → verify the Interpreter also shows improved predictions.
+
+### 7.5 Running Tests
 
 ```bash
 # Activate the virtual environment
 source .venv/bin/activate
 
-# Run all tests
+# Run all tests with coverage (via Makefile)
 make test
-# or
-pytest
 
 # Run a specific test file
-pytest tests/test_ops/test_dense.py -v
+.venv/bin/python -m pytest tests/ops/test_dense.py -v
 
-# Run with coverage (when configured)
-pytest --cov=litert_tunner
+# Run a specific test directory
+.venv/bin/python -m pytest tests/networks/ -v
+
+# Run linting
+ruff check src/ tests/
+ruff format --check src/ tests/
 ```
 
 ## 8. Agent Workflow Checklist
@@ -471,12 +513,22 @@ checklist:
 
 - [ ] **Understand** the LiteRT op specification (input/output tensors,
   attributes, quantization behavior).
-- [ ] **Implement** the op builder in `src/litert_tunner/ops/<op_name>.py`.
-- [ ] **Register** the op in `src/litert_tunner/ops/registry.py`.
-- [ ] **Implement** any new fake-quantization behavior if needed.
-- [ ] **Write unit tests** following the testing pipeline (Section 7).
+- [ ] **Implement** the op as a `keras.Layer` subclass in
+  `src/litert_tunner/ops/<op_name>.py`. Use the shared helpers from
+  `ops/utils.py`.
+- [ ] **Register** the op with `@registry.register_op("OP_TYPE")` in the same
+  file.
+- [ ] **Add import** in `src/litert_tunner/ops/__init__.py` to trigger
+  registration.
+- [ ] **Implement `Writable`** if the op has trainable parameters that need to
+  be written back to the flatbuffer.
+- [ ] **Write op-level unit tests** in `tests/ops/test_<op_name>.py` using the
+  `op_test_utils` framework.
+- [ ] **Write or extend a network-level test** in `tests/networks/` that
+  exercises the op in a real model, comparing Keras vs Interpreter outputs.
 - [ ] **Run linting**: `ruff check src/ tests/` and `ruff format src/ tests/`.
-- [ ] **Run all tests**: `pytest` — ensure nothing is broken.
+- [ ] **Run all tests**: `.venv/bin/python -m pytest` — ensure nothing is
+  broken.
 - [ ] **Update this file** if the change affects architecture or conventions.
 
 ## 9. What NOT to Do
@@ -493,11 +545,8 @@ checklist:
 - **Do not skip type hints or docstrings.** Code must be self-documenting.
 - **Do not use TF/JAX/PyTorch ops directly in production code.** Always use
   `keras.ops` for backend-agnostic compatibility.
-- **Do not use `flatc` CLI or JSON conversion for flatbuffer I/O.** Use the
-  `tflite` Python package with the Object API for programmatic read/write.
-- **Do not use Keras 3 built-in quantization API.** It uses symmetric
-  quantization, is one-way PTQ (not trainable), and doesn't parse TFLite
-  flatbuffers. Our library has fundamentally different goals.
-- **Do not use legacy `np.random.seed` or `np.random.uniform`.** Always use modern `np.random.default_rng(seed)` to obtain a generator instance (`Generator`) and call its methods.
+- **Do not use legacy `np.random.seed` or `np.random.uniform`.** Always use
+  modern `np.random.default_rng(seed)` to obtain a generator instance
+  (`Generator`) and call its methods.
 - **Do not import symbols directly from submodules.** Use Google-style imports
   (import the module, use dotted access).
