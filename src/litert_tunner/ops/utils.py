@@ -308,3 +308,25 @@ def make_quant_write_op(
         scales=scales,
         zero_points=zps,
     )
+
+
+def extract_constant_input(
+    input1_tensor: types.TensorInfo,
+    input1_quant: types.QuantizationParams,
+    input2_tensor: types.TensorInfo,
+    input2_quant: types.QuantizationParams,
+) -> tuple[np.ndarray | None, int]:
+    """Extract and quantize a constant input tensor to simulated INT8.
+
+    Returns:
+        A tuple of (quantized_constant_data, constant_index). If neither input
+        is constant, returns (None, -1).
+    """
+    for idx, (tensor, _quant) in enumerate(
+        [(input1_tensor, input1_quant), (input2_tensor, input2_quant)]
+    ):
+        if tensor.data is not None:
+            # Constant tensor data is already stored as INT8 in the flatbuffer.
+            # Store it as float32 for computation (simulated INT8 values).
+            return tensor.data.astype(np.float32), idx
+    return None, -1

@@ -133,7 +133,10 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
 
         # Build Keras model
         inputs = keras.Input(shape=input_shape)
-        x = inputs
+        # Subtract mean 0.5 and divide by 2
+        sub_val = np.array([0.5, 0.5, 0.5], dtype=np.float32)
+        x = inputs - sub_val
+        x = x * 0.5
 
         # First Conv layer
         x = keras.layers.Conv2D(

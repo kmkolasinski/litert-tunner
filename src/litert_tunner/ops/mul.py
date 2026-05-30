@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import typing
 from typing import TYPE_CHECKING
 
 import keras
+import numpy as np
 from keras import ops
 
 from litert_tunner.graph import types
@@ -38,6 +40,8 @@ class QuantizedMul(keras.Layer, types.Writable):
         output_scale: float,
         output_zero_point: float,
         fused_activation: int = utils.FUSED_ACTIVATION_NONE,
+        constant_input: np.ndarray | None = None,
+        constant_input_index: int = -1,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -48,6 +52,8 @@ class QuantizedMul(keras.Layer, types.Writable):
         self._output_scale = output_scale
         self._output_zero_point = output_zero_point
         self._fused_activation = fused_activation
+        self._constant_input_data = constant_input
+        self._constant_input_index = constant_input_index
 
     def build(self, input_shape: ShapeLike) -> None:
         """Create quantization params."""
@@ -89,11 +95,38 @@ class QuantizedMul(keras.Layer, types.Writable):
             initializer=keras.initializers.Constant(self._output_zero_point),
             trainable=True,
         )
+
+        # Constant input (frozen), stored as simulated INT8 float32
+        if self._constant_input_data is not None:
+            self.constant_input = self.add_weight(
+                name="constant_input",
+                shape=self._constant_input_data.shape,
+                initializer=keras.initializers.Constant(
+                    typing.cast("float", self._constant_input_data.astype(np.float32))
+                ),
+                trainable=False,
+            )
+
         super().build(input_shape)
 
-    def call(self, inputs: tuple[TensorLike, TensorLike] | list[TensorLike]) -> TensorLike:
-        """Forward pass simulating quantized MUL."""
-        x1, x2 = inputs
+    def call(
+        self, inputs: TensorLike | tuple[TensorLike, TensorLike] | list[TensorLike]
+    ) -> TensorLike:
+        """Forward pass simulating quantized MUL.
+
+        When one input is a constant stored in the layer, ``inputs`` is a single
+        tensor and the constant is retrieved from ``self.constant_input``.
+        """
+        if self._constant_input_data is not None:
+            # One input is a stored constant
+            dynamic_input = inputs
+            if self._constant_input_index == 0:
+                x1, x2 = self.constant_input, dynamic_input
+            else:
+                x1, x2 = dynamic_input, self.constant_input
+        else:
+            x1, x2 = inputs
+
         # 1. Dequantize
         x1_float = utils.dequantize_ste(x1, self.input1_scale, self.input1_zero_point)
         x2_float = utils.dequantize_ste(x2, self.input2_scale, self.input2_zero_point)
@@ -163,6 +196,11 @@ def build_mul(
 
     fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
 
+    # Detect constant inputs and pre-quantize them to simulated INT8
+    constant_input, constant_input_index = utils.extract_constant_input(
+        input1_tensor, input1_quant, input2_tensor, input2_quant
+    )
+
     return QuantizedMul(
         input1_scale=float(input1_quant.scales[0]),
         input1_zero_point=float(input1_quant.zero_points[0]),
@@ -171,5 +209,7 @@ def build_mul(
         output_scale=float(output_quant.scales[0]),
         output_zero_point=float(output_quant.zero_points[0]),
         fused_activation=fused_activation,
+        constant_input=constant_input,
+        constant_input_index=constant_input_index,
         name=f"quantized_mul_{op.output_indices[0]}",
     )

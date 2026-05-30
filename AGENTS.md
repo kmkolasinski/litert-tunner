@@ -148,28 +148,28 @@ programmatic parse → modify → re-serialize, entirely in Python.
 
 Currently implemented operations (one file per op in `src/litert_tunner/ops/`):
 
-| Op file             | TFLite op type(s)                      | Writable | Notes                             |
-| ------------------- | -------------------------------------- | -------- | --------------------------------- |
-| `dense.py`          | `FULLY_CONNECTED`                      | ✅       | Per-tensor weight quant           |
-| `conv2d.py`         | `CONV_2D`                              | ✅       | Per-channel weight quant          |
-| `depthwise_conv2d.py` | `DEPTHWISE_CONV_2D`                  | ✅       | Per-channel weight quant          |
-| `add.py`            | `ADD`                                  | ✅       | Requantizes both inputs           |
-| `mul.py`            | `MUL`                                  | ✅       | Requantizes both inputs           |
-| `logistic.py`       | `LOGISTIC`                             | ✅       | Sigmoid activation                |
-| `mean.py`           | `MEAN`                                 | ✅       | Reduce mean                       |
-| `quantize_op.py`    | `QUANTIZE`, `DEQUANTIZE`               | ✅       | Quantize/dequantize passthrough   |
-| `pool.py`           | `MAX_POOL_2D`, `AVERAGE_POOL_2D`       | ❌       | No trainable params               |
-| `reshape.py`        | `RESHAPE`                              | ❌       | Static or dynamic shape           |
-| `pack.py`           | `PACK`                                 | ❌       | Constant tensor packing           |
-| `shape_op.py`       | `SHAPE`                                | ❌       | Returns tensor shape              |
-| `strided_slice.py`  | `STRIDED_SLICE`                        | ❌       | Tensor slicing                    |
+| Op file               | TFLite op type(s)                | Writable | Notes                           |
+| --------------------- | -------------------------------- | -------- | ------------------------------- |
+| `dense.py`            | `FULLY_CONNECTED`                | ✅       | Per-tensor weight quant         |
+| `conv2d.py`           | `CONV_2D`                        | ✅       | Per-channel weight quant        |
+| `depthwise_conv2d.py` | `DEPTHWISE_CONV_2D`              | ✅       | Per-channel weight quant        |
+| `add.py`              | `ADD`                            | ✅       | Requantizes both inputs         |
+| `mul.py`              | `MUL`                            | ✅       | Requantizes both inputs         |
+| `logistic.py`         | `LOGISTIC`                       | ✅       | Sigmoid activation              |
+| `mean.py`             | `MEAN`                           | ✅       | Reduce mean                     |
+| `quantize_op.py`      | `QUANTIZE`, `DEQUANTIZE`         | ✅       | Quantize/dequantize passthrough |
+| `pool.py`             | `MAX_POOL_2D`, `AVERAGE_POOL_2D` | ❌       | No trainable params             |
+| `reshape.py`          | `RESHAPE`                        | ❌       | Static or dynamic shape         |
+| `pack.py`             | `PACK`                           | ❌       | Constant tensor packing         |
+| `shape_op.py`         | `SHAPE`                          | ❌       | Returns tensor shape            |
+| `strided_slice.py`    | `STRIDED_SLICE`                  | ❌       | Tensor slicing                  |
 
 **Adding a new op:**
 
 1. Create `src/litert_tunner/ops/<op_name>.py` with a `keras.Layer` subclass.
-2. Decorate the builder function with `@registry.register_op("OP_TYPE")`.
-3. Add the import to `src/litert_tunner/ops/__init__.py`.
-4. Write tests in `tests/ops/test_<op_name>.py`.
+1. Decorate the builder function with `@registry.register_op("OP_TYPE")`.
+1. Add the import to `src/litert_tunner/ops/__init__.py`.
+1. Write tests in `tests/ops/test_<op_name>.py`.
 
 Ops that persist parameters must implement the `Writable` protocol (see
 `graph/types.py`) and its `collect_write_ops()` method. Passthrough ops
@@ -180,6 +180,7 @@ Ops that persist parameters must implement the `Writable` protocol (see
 Each quantized op follows the same pattern:
 
 1. **Keras Layer class** (`QuantizedDense`, `QuantizedConv2D`, etc.):
+
    - `__init__`: Stores raw numpy data for weights, bias, and quant params.
    - `build`: Creates Keras weights via `self.add_weight(...)` — frozen for
      INT8 data, trainable for bias/scales/zero-points.
@@ -188,7 +189,8 @@ Each quantized op follows the same pattern:
    - `collect_write_ops`: Returns `BufferWriteOp` and `QuantizationWriteOp`
      instructions for the flatbuffer writer.
 
-2. **Builder function** (decorated with `@registry.register_op`):
+1. **Builder function** (decorated with `@registry.register_op`):
+
    - Extracts tensors, quantization params, and options from `OperatorInfo`.
    - Uses shared helpers from `ops/utils.py` (e.g., `get_bias_float32`,
      `get_quant_param_value`, `apply_fused_activation`).
@@ -471,6 +473,7 @@ def test__mlp_single_layer_forward(make_mlp_tflite, run_interpreter):
 ```
 
 Key points:
+
 - **Forward propagation comparison** between the Keras model output and the
   LiteRT Interpreter output is the primary validation method.
 - Typical tolerance: `atol=1e-3` for float I/O models.

@@ -20,6 +20,7 @@ from litert_tunner.ops import (
     reshape,
     shape_op,
     strided_slice,
+    sub,
     utils,
 )
 
@@ -38,5 +39,6 @@ __all__ = [
     "reshape",
     "shape_op",
     "strided_slice",
+    "sub",
     "utils",
 ]

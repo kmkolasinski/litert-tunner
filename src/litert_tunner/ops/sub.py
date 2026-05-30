@@ -1,4 +1,4 @@
-"""ADD op implementation for litert_tunner."""
+"""SUB op implementation for litert_tunner."""
 
 from __future__ import annotations
 
@@ -18,12 +18,12 @@ if TYPE_CHECKING:
     ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
 
 
-class QuantizedAdd(keras.Layer, types.Writable):
-    """Simulates TFLite's quantized ADD op.
+class QuantizedSub(keras.Layer, types.Writable):
+    """Simulates TFLite's quantized SUB op.
 
     The forward pass performs:
         1. Dequantize both INT8 inputs to float32
-        2. Add in float32
+        2. Subtract in float32 (input1 - input2)
         3. Apply fused activation (if any)
         4. Fake-quantize output to INT8
 
@@ -112,7 +112,7 @@ class QuantizedAdd(keras.Layer, types.Writable):
     def call(
         self, inputs: TensorLike | tuple[TensorLike, TensorLike] | list[TensorLike]
     ) -> TensorLike:
-        """Forward pass simulating quantized ADD.
+        """Forward pass simulating quantized SUB.
 
         When one input is a constant stored in the layer, ``inputs`` is a single
         tensor and the constant is retrieved from ``self.constant_input``.
@@ -130,8 +130,8 @@ class QuantizedAdd(keras.Layer, types.Writable):
         # 1. Dequantize
         x1_float = utils.dequantize_ste(x1, self.input1_scale, self.input1_zero_point)
         x2_float = utils.dequantize_ste(x2, self.input2_scale, self.input2_zero_point)
-        # 2. Add
-        output_float = ops.add(x1_float, x2_float)
+        # 2. Subtract
+        output_float = ops.subtract(x1_float, x2_float)
         # 3. Fused activation
         output_float = utils.apply_fused_activation(output_float, self._fused_activation)
         # 4. Quantize to simulated INT8
@@ -156,7 +156,7 @@ class QuantizedAdd(keras.Layer, types.Writable):
         self,
         op: types.OperatorInfo,
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
-        """Return flatbuffer write instructions for the ADD layer."""
+        """Return flatbuffer write instructions for the SUB layer."""
         quant_writes: list[types.QuantizationWriteOp] = []
         quant_writes.append(
             utils.make_quant_write_op(
@@ -176,12 +176,12 @@ class QuantizedAdd(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("ADD")
-def build_add(
+@registry.register_op("SUB")
+def build_sub(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a QuantizedAdd layer from parsed TFLite operator info."""
+    """Build a QuantizedSub layer from parsed TFLite operator info."""
     input1_tensor = tensors[op.input_indices[0]]
     input2_tensor = tensors[op.input_indices[1]]
     output_tensor = tensors[op.output_indices[0]]
@@ -191,7 +191,7 @@ def build_add(
     output_quant = output_tensor.quantization
 
     if input1_quant is None or input2_quant is None or output_quant is None:
-        msg = "ADD requires quantized input and output tensors"
+        msg = "SUB requires quantized input and output tensors"
         raise ValueError(msg)
 
     fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
@@ -201,7 +201,7 @@ def build_add(
         input1_tensor, input1_quant, input2_tensor, input2_quant
     )
 
-    return QuantizedAdd(
+    return QuantizedSub(
         input1_scale=float(input1_quant.scales[0]),
         input1_zero_point=float(input1_quant.zero_points[0]),
         input2_scale=float(input2_quant.scales[0]),
@@ -211,5 +211,5 @@ def build_add(
         fused_activation=fused_activation,
         constant_input=constant_input,
         constant_input_index=constant_input_index,
-        name=f"quantized_add_{op.output_indices[0]}",
+        name=f"quantized_sub_{op.output_indices[0]}",
     )
