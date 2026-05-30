@@ -550,3 +550,5 @@ checklist:
   (`Generator`) and call its methods.
 - **Do not import symbols directly from submodules.** Use Google-style imports
   (import the module, use dotted access).
+- **Do not set timeout to wait for tests** always wait required amount of time
+  for the test to complete.
