@@ -1,5 +1,6 @@
 # Byte-compiled / optimized / DLL files
 notebooks/
+test-results/
 .venv
 .ruff_cache
 .pytest_cache

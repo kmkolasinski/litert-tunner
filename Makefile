@@ -16,3 +16,11 @@ test: ## Runs the tests with coverage and parallel execution
 
 precommit: ## Runs the pre-commit hooks
 	pre-commit run --all-files
+
+clean: ## Removes test artifacts and cache directories
+	rm -rf test-results/
+	rm -rf .pytest_cache/
+	rm -rf .ruff_cache/
+	rm -f .coverage
+	find . -type d -name "__pycache__" -exec rm -rf {} +
+	find . -type f -name "*.pyc" -delete
