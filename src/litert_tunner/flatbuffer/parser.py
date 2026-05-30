@@ -178,8 +178,11 @@ def _parse_builtin_options(op: tflite.Operator) -> dict:
     if opt_cls is None:
         return options
 
+    builtin_options = op.BuiltinOptions()
+    if builtin_options is None:
+        return options
     opt_obj = opt_cls()
-    opt_obj.Init(op.BuiltinOptions().Bytes, op.BuiltinOptions().Pos)
+    opt_obj.Init(builtin_options.Bytes, builtin_options.Pos)
 
     for attr in dir(opt_obj):
         if attr.startswith("_") or attr in ("Init", "GetRootAs"):
@@ -215,18 +218,28 @@ def parse_tflite(path: str | Path) -> types.GraphDef:
 
     buf = bytearray(raw_bytes)
     model = tflite.Model.GetRootAs(buf, 0)
+    if model is None:
+        raise ValueError("Failed to parse TFLite model from bytes")
 
     if model.SubgraphsLength() == 0:
         raise ValueError("Model has no subgraphs")
     subgraph = model.Subgraphs(0)
+    if subgraph is None:
+        raise ValueError("Subgraph at index 0 is None")
 
     # 1. Parse Tensors
     tensors: list[types.TensorInfo] = []
     for idx in range(subgraph.TensorsLength()):
         tensor_t = subgraph.Tensors(idx)
-        name = tensor_t.Name()
-        if not isinstance(name, str):
-            name = name.decode("utf-8")
+        if tensor_t is None:
+            continue
+        raw_name = tensor_t.Name()
+        if raw_name is None:
+            name = f"tensor_{idx}"
+        elif isinstance(raw_name, bytes):
+            name = raw_name.decode("utf-8")
+        else:
+            name = str(raw_name)
         shape_np = tensor_t.ShapeAsNumpy()
         shape = tuple(shape_np) if not isinstance(shape_np, int) else ()
         dtype_str = _map_tensor_type(tensor_t.Type())
@@ -255,16 +268,16 @@ def parse_tflite(path: str | Path) -> types.GraphDef:
         buffer_idx = tensor_t.Buffer()
         buffer_t = model.Buffers(buffer_idx)
         tensor_data = None
-
-        data_np = buffer_t.DataAsNumpy()
-        if not isinstance(data_np, int) and len(data_np) > 0:
-            try:
-                dtype = get_numpy_dtype(tensor_t.Type())
-                tensor_data = np.frombuffer(data_np.tobytes(), dtype=dtype).copy()
-                if shape:
-                    tensor_data = tensor_data.reshape(shape)
-            except Exception:
-                pass
+        if buffer_t is not None:
+            data_np = buffer_t.DataAsNumpy()
+            if not isinstance(data_np, int) and len(data_np) > 0:
+                try:
+                    dtype = get_numpy_dtype(tensor_t.Type())
+                    tensor_data = np.frombuffer(data_np.tobytes(), dtype=dtype).copy()
+                    if shape:
+                        tensor_data = tensor_data.reshape(shape)
+                except Exception:
+                    pass
 
         tensors.append(
             types.TensorInfo(
@@ -282,11 +295,18 @@ def parse_tflite(path: str | Path) -> types.GraphDef:
     operators: list[types.OperatorInfo] = []
     for idx in range(subgraph.OperatorsLength()):
         op_t = subgraph.Operators(idx)
-        opcode_t = model.OperatorCodes(op_t.OpcodeIndex())
+        if op_t is None:
+            continue
+        opcode_idx = op_t.OpcodeIndex()
+        opcode_t = model.OperatorCodes(opcode_idx)
+        if opcode_t is None:
+            raise ValueError(f"OperatorCode at index {opcode_idx} is None")
         op_type = get_op_code_name(opcode_t)
 
-        input_indices = tuple(op_t.InputsAsNumpy())
-        output_indices = tuple(op_t.OutputsAsNumpy())
+        inputs_np = op_t.InputsAsNumpy()
+        input_indices = tuple(inputs_np) if isinstance(inputs_np, np.ndarray) else ()
+        outputs_np = op_t.OutputsAsNumpy()
+        output_indices = tuple(outputs_np) if isinstance(outputs_np, np.ndarray) else ()
         options = _parse_builtin_options(op_t)
 
         operators.append(
@@ -298,8 +318,10 @@ def parse_tflite(path: str | Path) -> types.GraphDef:
             )
         )
 
-    input_indices = tuple(subgraph.InputsAsNumpy()) if not subgraph.InputsIsNone() else ()
-    output_indices = tuple(subgraph.OutputsAsNumpy()) if not subgraph.OutputsIsNone() else ()
+    sub_inputs = subgraph.InputsAsNumpy()
+    input_indices = tuple(sub_inputs) if isinstance(sub_inputs, np.ndarray) else ()
+    sub_outputs = subgraph.OutputsAsNumpy()
+    output_indices = tuple(sub_outputs) if isinstance(sub_outputs, np.ndarray) else ()
 
     return types.GraphDef(
         tensors=tuple(tensors),

@@ -7,8 +7,13 @@ Straight-Through Estimator (STE).
 All layers use keras.ops for backend-agnostic computation.
 """
 
+import typing
+
 import keras
+import numpy as np
 from keras import ops
+
+from litert_tunner.graph import types
 
 # INT8 quantization range constants
 _INT8_MIN = -128.0
@@ -87,6 +92,8 @@ class Dequantize(keras.Layer):
     Args:
         scale: Dequantization scale value(s). Can be a scalar or array.
         zero_point: Zero point value(s). Can be a scalar or array.
+        passthrough: If True, passes the input through unchanged (e.g. if the
+            input is already dequantized).
         name: Layer name.
     """
 
@@ -94,11 +101,13 @@ class Dequantize(keras.Layer):
         self,
         scale: float,
         zero_point: float,
+        passthrough: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._initial_scale = scale
         self._initial_zero_point = zero_point
+        self._passthrough = passthrough
 
     def build(self, input_shape):
         """Create scale and zero_point weights for the layer."""
@@ -118,6 +127,8 @@ class Dequantize(keras.Layer):
 
     def call(self, x):
         """Dequantize input tensor."""
+        if self._passthrough:
+            return x
         x_float = ops.cast(x, "float32")
         return self.scale * (x_float - self.zero_point)
 
@@ -128,9 +139,36 @@ class Dequantize(keras.Layer):
             {
                 "scale": self._initial_scale,
                 "zero_point": self._initial_zero_point,
+                "passthrough": self._passthrough,
             }
         )
         return config
+
+    def collect_write_ops(
+        self,
+        op: types.OperatorInfo,
+        tensors: tuple[types.TensorInfo, ...],
+    ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
+        """Return flatbuffer write instructions for the Dequantize layer.
+
+        Updates the quantization params on the input tensor.
+
+        Args:
+            op: The OperatorInfo that this layer was built from.
+            tensors: All tensors in the graph.
+
+        Returns:
+            A tuple of (buffer_writes, quantization_writes).
+        """
+        if self._passthrough:
+            return [], []
+        input_tensor_idx = op.input_indices[0]
+        scale_val = float(typing.cast(typing.Any, ops.convert_to_numpy(self.scale)))
+        zp_val = int(np.round(typing.cast(typing.Any, ops.convert_to_numpy(self.zero_point))))
+        quant_write = types.QuantizationWriteOp(
+            tensor_index=input_tensor_idx, scales=[scale_val], zero_points=[zp_val]
+        )
+        return [], [quant_write]
 
 
 class Quantize(keras.Layer):
@@ -191,6 +229,30 @@ class Quantize(keras.Layer):
             }
         )
         return config
+
+    def collect_write_ops(
+        self,
+        op: types.OperatorInfo,
+        tensors: tuple[types.TensorInfo, ...],
+    ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
+        """Return flatbuffer write instructions for the Quantize layer.
+
+        Updates the quantization params on the output tensor.
+
+        Args:
+            op: The OperatorInfo that this layer was built from.
+            tensors: All tensors in the graph.
+
+        Returns:
+            A tuple of (buffer_writes, quantization_writes).
+        """
+        output_tensor_idx = op.output_indices[0]
+        scale_val = float(typing.cast(typing.Any, ops.convert_to_numpy(self.scale)))
+        zp_val = int(np.round(typing.cast(typing.Any, ops.convert_to_numpy(self.zero_point))))
+        quant_write = types.QuantizationWriteOp(
+            tensor_index=output_tensor_idx, scales=[scale_val], zero_points=[zp_val]
+        )
+        return [], [quant_write]
 
 
 def _round_ste(x):

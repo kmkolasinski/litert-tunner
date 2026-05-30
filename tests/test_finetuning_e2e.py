@@ -1,10 +1,9 @@
 """Fine-tuning end-to-end smoke test."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Callable
 
+import keras
 import numpy as np
 
 import litert_tunner
@@ -31,6 +30,11 @@ def test__finetuning_smoke_test(
     # 2. Load model
     tunner_model = litert_tunner.load_model(str(model_path))
 
+    # Freeze scales/zero_points to make fine-tuning focus on the bias
+    for v in tunner_model.trainable_variables:
+        if "bias" not in v.name:
+            v.trainable = False
+
     # Generate some training inputs and target outputs
     np.random.seed(42)
     x_train = np.random.uniform(-1.0, 1.0, (32, 8)).astype(np.float32)
@@ -38,26 +42,41 @@ def test__finetuning_smoke_test(
     y_targets = initial_outputs + 0.5
 
     # 3. Fine-tune the tunner model
-    tunner_model.compile(optimizer="adam", loss="mse")
+    # Use SGD with a learning rate of 0.2 so the bias can quickly adapt to the +0.5 shift
+    tunner_model.compile(optimizer=keras.optimizers.SGD(learning_rate=0.2), loss="mse")
 
     # Check initial loss
-    initial_loss = tunner_model.evaluate(x_train, y_targets, verbose=0)
+    initial_loss = float(tunner_model.evaluate(x_train, y_targets, verbose=0))  # type: ignore
+    assert initial_loss > 0.2, f"Initial loss should be worse (higher), but got: {initial_loss}"
 
     # Train for 15 epochs to ensure convergence/loss reduction
-    tunner_model.fit(x_train, y_targets, epochs=15, batch_size=8, verbose=0)
+    tunner_model.fit(x_train, y_targets, epochs=15, batch_size=8, verbose=0)  # type: ignore
 
     # Check that loss has decreased after training
-    final_loss = tunner_model.evaluate(x_train, y_targets, verbose=0)
-    assert final_loss < initial_loss
+    final_loss = float(tunner_model.evaluate(x_train, y_targets, verbose=0))  # type: ignore
+    assert final_loss < 0.05, f"Final loss should be improved, but got: {final_loss}"
+    assert final_loss < initial_loss, (
+        f"Final loss ({final_loss}) is not better than initial loss ({initial_loss})"
+    )
 
     # 4. Save and reload model
     litert_tunner.save_model(tunner_model, str(saved_path))
 
     # 5. Verify the saved model has the updated predictions in the Interpreter
-    ref_inputs = np.random.uniform(-1.0, 1.0, (5, 8)).astype(np.float32)
+    original_saved_outputs = run_interpreter(model_path, x_train)
+    finetuned_saved_outputs = run_interpreter(saved_path, x_train)
 
-    original_saved_outputs = run_interpreter(model_path, ref_inputs)
-    finetuned_saved_outputs = run_interpreter(saved_path, ref_inputs)
+    original_mse = float(np.mean((original_saved_outputs - y_targets) ** 2))
+    finetuned_mse = float(np.mean((finetuned_saved_outputs - y_targets) ** 2))
 
-    # The predictions should be different because the model parameters were modified/fine-tuned
-    assert not np.allclose(original_saved_outputs, finetuned_saved_outputs, atol=1e-5)
+    # Confirm that original Interpreter predictions are worse (higher MSE)
+    assert original_mse > 0.2, f"Original Interpreter MSE should be worse, but got: {original_mse}"
+
+    # Confirm that finetuned Interpreter predictions are better (lower MSE)
+    assert finetuned_mse < 0.05, (
+        f"Finetuned Interpreter MSE should be improved, but got: {finetuned_mse}"
+    )
+    assert finetuned_mse < original_mse, (
+        f"Finetuned Interpreter MSE ({finetuned_mse}) is not better than "
+        f"original MSE ({original_mse})"
+    )

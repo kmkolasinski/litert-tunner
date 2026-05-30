@@ -5,11 +5,14 @@ help: ## Print this message and exit.
 SHELL := /bin/bash
 
 
+venv: ## Creates a virtual environment using uv
+	uv venv
+
 install: ## Installs the project in editable mode with dev dependencies
-	python -m pip install -e ".[dev]"
+	uv pip install -e ".[dev]"
 
 test: ## Runs the tests
-	pytest
+	pytest tests
 
 precommit: ## Runs the pre-commit hooks
 	pre-commit run --all-files

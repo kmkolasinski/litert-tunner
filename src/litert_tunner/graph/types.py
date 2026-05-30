@@ -85,6 +85,34 @@ class OperatorInfo:
 
 
 @dataclass(frozen=True)
+class BufferWriteOp:
+    """Instruction to overwrite a tensor's buffer data in the flatbuffer.
+
+    Attributes:
+        tensor_index: Index of the tensor whose buffer should be updated.
+        data: New raw bytes to write into the buffer.
+    """
+
+    tensor_index: int
+    data: bytes
+
+
+@dataclass(frozen=True)
+class QuantizationWriteOp:
+    """Instruction to overwrite a tensor's quantization params in the flatbuffer.
+
+    Attributes:
+        tensor_index: Index of the tensor whose quantization params should be updated.
+        scales: New scale values (float32).
+        zero_points: New zero-point values (int64).
+    """
+
+    tensor_index: int
+    scales: list[float]
+    zero_points: list[int]
+
+
+@dataclass(frozen=True)
 class GraphDef:
     """Complete parsed graph definition from a .tflite file.
 

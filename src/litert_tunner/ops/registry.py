@@ -11,12 +11,10 @@ from collections.abc import Callable
 
 import keras
 
-from litert_tunner.graph import types
-
 # Type alias for op builder functions.
-# An op builder receives the OperatorInfo and a list of TensorInfos
-# (all tensors in the graph) and returns a Keras layer.
-OpBuilder = Callable[[types.OperatorInfo, tuple[types.TensorInfo, ...]], keras.Layer]
+# An op builder receives the OperatorInfo, a list of TensorInfos, and an optional GraphDef,
+# and returns a Keras layer.
+OpBuilder = Callable[..., keras.Layer]
 
 # Internal registry mapping op type string → builder function.
 _REGISTRY: dict[str, OpBuilder] = {}

@@ -13,6 +13,7 @@ from litert_tunner.quantization import fake_quant
 def build_quantize(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
+    graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
     """Build a Quantize layer from parsed TFLite operator info.
 
@@ -43,6 +44,7 @@ def build_quantize(
 def build_dequantize(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
+    graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
     """Build a Dequantize layer from parsed TFLite operator info.
 
@@ -61,8 +63,17 @@ def build_dequantize(
     scale = float(input_quant.scales[0])
     zero_point = float(input_quant.zero_points[0])
 
+    # Check if the input tensor is produced by another operator in the graph
+    passthrough = False
+    if graph_def is not None:
+        for other_op in graph_def.operators:
+            if op.input_indices[0] in other_op.output_indices:
+                passthrough = True
+                break
+
     return fake_quant.Dequantize(
         scale=scale,
         zero_point=zero_point,
+        passthrough=passthrough,
         name=f"dequantize_{op.output_indices[0]}",
     )

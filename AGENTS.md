@@ -401,9 +401,15 @@ Keep the dependency footprint minimal. Do not add unnecessary libraries.
 
 ### 6.7 Environment
 
-- **Always check** the active conda environment before running any Python code,
-  tests, or scripts: `echo $CONDA_DEFAULT_ENV`.
+- **Always check** the active environment before running any Python code,
+  tests, or scripts.
+- All tests and Python commands should be run within the virtual environment activated using `source .venv/bin/activate`.
+- If using conda, check the active conda environment with `echo $CONDA_DEFAULT_ENV`.
 - If the environment is not clear, ask the user.
+- **Command Execution Rules**:
+  - **Tooling**: The project uses `uv` for package/environment management. Do not assume `pip` or `.venv/bin/pip` is present; use `uv pip` instead.
+  - **Testing**: Always run tests using `.venv/bin/python -m pytest <path_to_test>` rather than directly invoking `.venv/bin/pytest` or `pytest`. This guarantees that Python resolves the root `tests` module correctly without raising `ModuleNotFoundError`.
+  - **Type Checking (Pyright)**: Pyright is run via Node/npm. Always run it non-interactively using `npx -y pyright` to prevent blocking on interactive npm prompts. To configure it to use the project's virtual environment, pass the `--pythonpath .venv/bin/python` argument (do not use `--venv`).
 
 ## 7. Testing Pipeline
 
@@ -442,8 +448,8 @@ For each new op, the agent must:
 ### 7.4 Running Tests
 
 ```bash
-# Ensure correct environment
-echo $CONDA_DEFAULT_ENV
+# Activate the virtual environment
+source .venv/bin/activate
 
 # Run all tests
 make test

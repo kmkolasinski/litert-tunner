@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, cast
 
 import keras
 import numpy as np
@@ -39,8 +39,8 @@ def make_dense_tflite(temp_model_dir: Path) -> Callable:
             units=num_units,
             use_bias=use_bias,
             activation=activation,
-            kernel_initializer=keras.initializers.RandomUniform(-0.5, 0.5),
-            bias_initializer=keras.initializers.RandomUniform(-0.1, 0.1),
+            kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
+            bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
         )(inputs)
         model = keras.Model(inputs=inputs, outputs=outputs)
 

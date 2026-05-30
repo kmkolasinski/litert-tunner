@@ -2,6 +2,7 @@
 .venv
 .ruff_cache
 .pytest_cache
+.antigravitycli
 .vscode
 __pycache__
 *.py[codz]
