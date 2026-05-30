@@ -227,6 +227,53 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
     return _make
 
 
+@pytest.fixture
+def make_efficientnetb0_tflite(temp_model_dir: Path) -> Callable:
+    """Fixture returning a function to create fully quantized INT8 EfficientNetB0 TFLite models."""
+
+    def _make(
+        input_shape: tuple[int, int, int] = (96, 96, 3),
+        weights: str | None = "imagenet",
+        num_outputs: int = 10,
+        float_io: bool = True,
+        seed: int = 42,
+    ) -> Path:
+        tf.random.set_seed(seed)
+
+        # Build Keras model using EfficientNetB0 backbone and custom classification head
+        backbone = keras.applications.EfficientNetB0(
+            include_top=False,
+            weights=cast("Any", weights),
+            input_shape=input_shape,
+        )
+        x = backbone.output
+        x = keras.layers.GlobalAveragePooling2D()(x)
+        x = keras.layers.Dropout(0.3)(x)
+        x = keras.layers.Dense(256, name="embeddings")(x)
+        logits = keras.layers.Dense(
+            units=num_outputs,
+            activation=None,
+            kernel_initializer=cast("Any", keras.initializers.RandomUniform(-0.5, 0.5)),
+            bias_initializer=cast("Any", keras.initializers.RandomUniform(-0.1, 0.1)),
+            name="logits",
+        )(x)
+        model = keras.Model(inputs=backbone.input, outputs=logits)
+        model.summary()
+
+        # Save to temp path
+        shape_str = "_".join(map(str, input_shape))
+        weights_str = str(weights)
+        output_path = (
+            temp_model_dir
+            / f"efficientnetb0_{shape_str}_{weights_str}_{num_outputs}_{float_io}.tflite"
+        )
+        export_quantized_tflite_model(input_shape, model, float_io, output_path)
+
+        return output_path
+
+    return _make
+
+
 def export_quantized_tflite_model(
     input_shape: tuple[int, ...], model: keras.Model, float_io: bool, output_path: Path
 ):

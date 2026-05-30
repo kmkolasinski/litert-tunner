@@ -15,7 +15,6 @@ from __future__ import annotations
 import keras
 import numpy as np
 
-from litert_tunner.flatbuffer import writer
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
 
@@ -173,7 +172,7 @@ def assert_layer_is_writable(layer: keras.Layer) -> None:
     Args:
         layer: The Keras layer to check.
     """
-    assert isinstance(layer, writer.Writable), (
+    assert isinstance(layer, types.Writable), (
         f"Layer {layer.name!r} ({type(layer).__name__}) does not implement "
         f"the Writable protocol (missing collect_write_ops method)."
     )
@@ -188,7 +187,7 @@ def assert_layer_not_writable(layer: keras.Layer) -> None:
     Args:
         layer: The Keras layer to check.
     """
-    assert not isinstance(layer, writer.Writable), (
+    assert not isinstance(layer, types.Writable), (
         f"Layer {layer.name!r} ({type(layer).__name__}) unexpectedly implements "
         f"the Writable protocol."
     )
@@ -252,7 +251,6 @@ def assert_output_shape(
 def assert_collect_write_ops(
     layer: keras.Layer,
     op: types.OperatorInfo,
-    tensors: tuple[types.TensorInfo, ...],
     *,
     expected_buffer_writes: int,
     expected_quant_writes: int,
@@ -264,7 +262,6 @@ def assert_collect_write_ops(
     Args:
         layer: The Keras layer to call.
         op: The OperatorInfo used during build.
-        tensors: All tensors in the graph.
         expected_buffer_writes: Expected number of ``BufferWriteOp`` entries.
         expected_quant_writes: Expected number of ``QuantizationWriteOp`` entries.
 
@@ -272,7 +269,7 @@ def assert_collect_write_ops(
         The ``(buffer_writes, quant_writes)`` tuple for further inspection.
     """
     assert_layer_is_writable(layer)
-    buf_writes, quant_writes = layer.collect_write_ops(op, tensors)
+    buf_writes, quant_writes = layer.collect_write_ops(op)
 
     assert len(buf_writes) == expected_buffer_writes, (
         f"BufferWriteOp count mismatch for {layer.name!r}: "

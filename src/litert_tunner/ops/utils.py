@@ -11,8 +11,7 @@ import typing
 import numpy as np
 from keras import ops
 
-if typing.TYPE_CHECKING:
-    from litert_tunner.graph import types
+from litert_tunner.graph import types
 
 # Fused activation function codes from TFLite schema
 FUSED_ACTIVATION_NONE = 0
@@ -140,3 +139,172 @@ def apply_fused_activation(x: TensorLike, fused_activation: int) -> TensorLike:
         return ops.clip(x, -1.0, 1.0)
     msg = f"Unsupported fused activation: {fused_activation}"
     raise ValueError(msg)
+
+
+# INT8 range constants
+_INT8_MIN_F = -128.0
+_INT8_MAX_F = 127.0
+INT8_MIN = -128
+INT8_MAX = 127
+
+# Type aliases
+TensorOrScalar = typing.Any
+
+
+def quantize_int8(
+    x: np.ndarray,
+    scale: np.ndarray | float,
+    zero_point: np.ndarray | int,
+) -> np.ndarray:
+    """Quantize float32 values to INT8 using TFLite's affine scheme.
+
+    Formula: int8_value = clamp(round(x / scale) + zero_point, -128, 127)
+
+    Args:
+        x: Float32 values to quantize.
+        scale: Quantization scale (per-tensor or per-channel).
+        zero_point: Quantization zero point (per-tensor or per-channel).
+
+    Returns:
+        INT8 quantized values as int8 numpy array.
+    """
+    scaled = np.round(x / scale) + zero_point
+    clamped = np.clip(scaled, INT8_MIN, INT8_MAX)
+    return clamped.astype(np.int8)
+
+
+def dequantize_float(
+    x: np.ndarray,
+    scale: np.ndarray | float,
+    zero_point: np.ndarray | int,
+) -> np.ndarray:
+    """Dequantize INT8 values to float32 using TFLite's affine scheme.
+
+    Formula: real_value = scale * (int8_value - zero_point)
+
+    Args:
+        x: INT8 quantized values.
+        scale: Quantization scale (per-tensor or per-channel).
+        zero_point: Quantization zero point (per-tensor or per-channel).
+
+    Returns:
+        Float32 dequantized values.
+    """
+    return scale * (x.astype(np.float32) - np.float32(zero_point))
+
+
+def compute_requantize_multiplier(
+    input_scale: float,
+    weight_scale: np.ndarray | float,
+    output_scale: float,
+) -> np.ndarray | float:
+    """Compute the requantization multiplier for fused ops.
+
+    In TFLite, the accumulator (INT32) is rescaled to the output
+    quantization domain using:
+        multiplier = (input_scale * weight_scale) / output_scale
+
+    Args:
+        input_scale: Scale of the input activation tensor.
+        weight_scale: Scale of the weight tensor (scalar or per-channel array).
+        output_scale: Scale of the output activation tensor.
+
+    Returns:
+        Requantization multiplier (scalar or per-channel array).
+    """
+    return (input_scale * weight_scale) / output_scale
+
+
+def _round_ste(x: TensorLike) -> TensorLike:
+    """Round with Straight-Through Estimator.
+
+    Forward: round(x)
+    Backward: identity (gradient passes through unchanged)
+    """
+    return x + ops.stop_gradient(ops.round(x) - x)
+
+
+def _clip_ste(x: TensorLike, min_val: float, max_val: float) -> TensorLike:
+    """Clip with Straight-Through Estimator.
+
+    Forward: clip(x, min_val, max_val)
+    Backward: identity (gradient passes through unchanged)
+    """
+    return x + ops.stop_gradient(ops.clip(x, min_val, max_val) - x)
+
+
+def quantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
+    """Quantize float32 → simulated INT8 with STE gradients."""
+    scaled = x / scale
+    rounded = _round_ste(scaled)
+    shifted = rounded + zero_point
+    return _clip_ste(shifted, _INT8_MIN_F, _INT8_MAX_F)
+
+
+def dequantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
+    """Dequantize simulated INT8 values to float32.
+
+    Formula: real_value = scale * (x - zero_point)
+    """
+    x_float = ops.cast(x, "float32")
+    return scale * (x_float - zero_point)
+
+
+def _fake_quantize(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
+    """Fake quantize: quantize then dequantize with STE gradients."""
+    quantized = quantize_ste(x, scale, zero_point)
+    return dequantize_ste(quantized, scale, zero_point)
+
+
+def to_float_list(tensor: TensorOrScalar) -> list[float]:
+    """Converts a tensor to a list of float values.
+
+    Args:
+        tensor: The input tensor.
+
+    Returns:
+        A list of python float values.
+    """
+    arr = np.asarray(typing.cast("np.ndarray", ops.convert_to_numpy(tensor)))
+    if arr.ndim == 0:
+        return [float(arr)]
+    return [float(x) for x in arr]
+
+
+def to_int_list(tensor: TensorOrScalar) -> list[int]:
+    """Converts a tensor to a list of rounded integer values.
+
+    Args:
+        tensor: The input tensor.
+
+    Returns:
+        A list of python int values.
+    """
+    arr = np.asarray(typing.cast("np.ndarray", ops.convert_to_numpy(tensor)))
+    if arr.ndim == 0:
+        return [int(np.round(arr))]
+    return [int(np.round(x)) for x in arr]
+
+
+def make_quant_write_op(
+    tensor_index: int,
+    scale_tensor: TensorOrScalar,
+    zp_tensor: TensorOrScalar,
+) -> types.QuantizationWriteOp:
+    """Helper to construct a QuantizationWriteOp from Keras scale/zp weights.
+
+    Args:
+        tensor_index: The index of the tensor in the flatbuffer.
+        scale_tensor: The scale weight/tensor.
+        zp_tensor: The zero point weight/tensor.
+
+    Returns:
+        A QuantizationWriteOp populated with Python list values.
+    """
+    scales = to_float_list(scale_tensor)
+    zps = to_int_list(zp_tensor)
+    return types.QuantizationWriteOp(
+        tensor_index=tensor_index,
+        scales=scales,
+        zero_points=zps,
+    )

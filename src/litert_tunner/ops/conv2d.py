@@ -21,7 +21,7 @@ if typing.TYPE_CHECKING:
     from litert_tunner.ops.utils import TensorLike
 
     ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
-from litert_tunner.quantization import fake_quant
+
 
 # TFLite padding integer codes
 _PADDING_SAME = 0
@@ -33,7 +33,7 @@ _PADDING_MAP: dict[int, str] = {
 }
 
 
-class QuantizedConv2D(keras.Layer):
+class QuantizedConv2D(keras.Layer, types.Writable):
     """Simulates TFLite's quantized Conv2D op.
 
     The forward pass performs:
@@ -168,7 +168,7 @@ class QuantizedConv2D(keras.Layer):
             Output tensor after fake-quantized convolution.
         """
         # 1. Dequantize input: float = scale * (int8 - zero_point)
-        input_float = fake_quant.dequantize_ste(x, self.input_scale, self.input_zero_point)
+        input_float = utils.dequantize_ste(x, self.input_scale, self.input_zero_point)
 
         # 2. Dequantize weights (per-channel along output channel axis 0)
         # TFLite Conv2D weight shape: (out_ch, kH, kW, in_ch)
@@ -178,7 +178,7 @@ class QuantizedConv2D(keras.Layer):
         if len(weight_scale.shape) > 0:
             weight_scale = ops.reshape(weight_scale, (-1, 1, 1, 1))
             weight_zp = ops.reshape(weight_zp, (-1, 1, 1, 1))
-        weight_float = fake_quant.dequantize_ste(self.weight_int8, weight_scale, weight_zp)
+        weight_float = utils.dequantize_ste(self.weight_int8, weight_scale, weight_zp)
 
         # 3. Conv2D + bias
         # Keras conv expects kernel shape (kH, kW, in_ch, out_ch) but TFLite stores
@@ -197,7 +197,7 @@ class QuantizedConv2D(keras.Layer):
         output = utils.apply_fused_activation(output, self._fused_activation)
 
         # 5. Quantize output to simulated INT8 (with STE for gradient flow)
-        return fake_quant.quantize_ste(output, self.output_scale, self.output_zero_point)
+        return utils.quantize_ste(output, self.output_scale, self.output_zero_point)
 
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
@@ -221,7 +221,6 @@ class QuantizedConv2D(keras.Layer):
     def collect_write_ops(
         self,
         op: types.OperatorInfo,
-        _tensors: tuple[types.TensorInfo, ...],
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
         """Return flatbuffer write instructions for the Conv2D layer.
 
@@ -263,20 +262,14 @@ class QuantizedConv2D(keras.Layer):
         # Write quantization params
         input_tensor_idx = op_inputs[0]
         quant_writes.append(
-            fake_quant.make_quant_write_op(
-                input_tensor_idx, self.input_scale, self.input_zero_point
-            )
+            utils.make_quant_write_op(input_tensor_idx, self.input_scale, self.input_zero_point)
         )
         quant_writes.append(
-            fake_quant.make_quant_write_op(
-                weight_tensor_idx, self.weight_scale, self.weight_zero_point
-            )
+            utils.make_quant_write_op(weight_tensor_idx, self.weight_scale, self.weight_zero_point)
         )
         output_tensor_idx = op_outputs[0]
         quant_writes.append(
-            fake_quant.make_quant_write_op(
-                output_tensor_idx, self.output_scale, self.output_zero_point
-            )
+            utils.make_quant_write_op(output_tensor_idx, self.output_scale, self.output_zero_point)
         )
 
         return buffer_writes, quant_writes
@@ -304,7 +297,6 @@ def _map_padding(padding_code: int) -> str:
 def build_conv2d(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
-    _graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
     """Build a QuantizedConv2D layer from parsed TFLite operator info.
 

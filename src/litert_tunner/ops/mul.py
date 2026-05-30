@@ -7,17 +7,16 @@ from typing import TYPE_CHECKING
 import keras
 from keras import ops
 
+from litert_tunner.graph import types
 from litert_tunner.ops import registry, utils
-from litert_tunner.quantization import fake_quant
 
 if TYPE_CHECKING:
-    from litert_tunner.graph import types
     from litert_tunner.ops.utils import TensorLike
 
     ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
 
 
-class QuantizedMul(keras.Layer):
+class QuantizedMul(keras.Layer, types.Writable):
     """Simulates TFLite's quantized MUL op.
 
     The forward pass performs:
@@ -96,14 +95,14 @@ class QuantizedMul(keras.Layer):
         """Forward pass simulating quantized MUL."""
         x1, x2 = inputs
         # 1. Dequantize
-        x1_float = fake_quant.dequantize_ste(x1, self.input1_scale, self.input1_zero_point)
-        x2_float = fake_quant.dequantize_ste(x2, self.input2_scale, self.input2_zero_point)
+        x1_float = utils.dequantize_ste(x1, self.input1_scale, self.input1_zero_point)
+        x2_float = utils.dequantize_ste(x2, self.input2_scale, self.input2_zero_point)
         # 2. Multiply
         output_float = ops.multiply(x1_float, x2_float)
         # 3. Fused activation
         output_float = utils.apply_fused_activation(output_float, self._fused_activation)
         # 4. Quantize to simulated INT8
-        return fake_quant.quantize_ste(output_float, self.output_scale, self.output_zero_point)
+        return utils.quantize_ste(output_float, self.output_scale, self.output_zero_point)
 
     def get_config(self):
         config = super().get_config()
@@ -123,22 +122,21 @@ class QuantizedMul(keras.Layer):
     def collect_write_ops(
         self,
         op: types.OperatorInfo,
-        _tensors: tuple[types.TensorInfo, ...],
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
         """Return flatbuffer write instructions for the MUL layer."""
         quant_writes: list[types.QuantizationWriteOp] = []
         quant_writes.append(
-            fake_quant.make_quant_write_op(
+            utils.make_quant_write_op(
                 op.input_indices[0], self.input1_scale, self.input1_zero_point
             )
         )
         quant_writes.append(
-            fake_quant.make_quant_write_op(
+            utils.make_quant_write_op(
                 op.input_indices[1], self.input2_scale, self.input2_zero_point
             )
         )
         quant_writes.append(
-            fake_quant.make_quant_write_op(
+            utils.make_quant_write_op(
                 op.output_indices[0], self.output_scale, self.output_zero_point
             )
         )
@@ -149,7 +147,6 @@ class QuantizedMul(keras.Layer):
 def build_mul(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
-    _graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
     """Build a QuantizedMul layer from parsed TFLite operator info."""
     input1_tensor = tensors[op.input_indices[0]]

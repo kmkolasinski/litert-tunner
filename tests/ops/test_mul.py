@@ -111,7 +111,6 @@ class TestMulWriteOps:
         op_test_utils.assert_collect_write_ops(
             layer,
             op,
-            tensors,
             expected_buffer_writes=0,
             expected_quant_writes=3,
         )
@@ -120,7 +119,7 @@ class TestMulWriteOps:
         op, tensors = mul_setup
         inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
-        _, quant_writes = layer.collect_write_ops(op, tensors)
+        _, quant_writes = layer.collect_write_ops(op)
         op_test_utils.assert_quant_write_tensor_indices(
             quant_writes, {op.input_indices[0], op.input_indices[1], op.output_indices[0]}
         )

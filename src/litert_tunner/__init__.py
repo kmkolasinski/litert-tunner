@@ -2,7 +2,7 @@
 
 import keras
 
-from litert_tunner import flatbuffer, graph, ops, quantization
+from litert_tunner import flatbuffer, graph, ops
 
 __version__ = "0.1.0"
 
@@ -35,6 +35,5 @@ __all__ = [
     "graph",
     "load_model",
     "ops",
-    "quantization",
     "save_model",
 ]

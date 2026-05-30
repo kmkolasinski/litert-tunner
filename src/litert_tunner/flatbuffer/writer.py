@@ -7,7 +7,6 @@ support for a new op requires zero changes here.
 """
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 import flatbuffers
 import flatbuffers.number_types
@@ -16,32 +15,6 @@ import numpy as np
 import tflite
 
 from litert_tunner.graph import types
-
-
-@runtime_checkable
-class Writable(Protocol):
-    """Protocol for Keras layers that know how to serialize themselves back to a flatbuffer.
-
-    Any layer that needs to persist updated parameters must implement this
-    protocol by providing a ``collect_write_ops`` method. The writer calls it
-    once per layer and applies the returned instructions to the flatbuffer.
-    """
-
-    def collect_write_ops(
-        self,
-        op: types.OperatorInfo,
-        tensors: tuple[types.TensorInfo, ...],
-    ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
-        """Return flatbuffer write instructions for this layer.
-
-        Args:
-            op: The OperatorInfo that this layer was built from.
-            tensors: All tensors in the graph.
-
-        Returns:
-            A tuple of (buffer_writes, quantization_writes).
-        """
-        ...
 
 
 def save_tflite(model: keras.Model, path: str | Path) -> None:
@@ -80,10 +53,10 @@ def save_tflite(model: keras.Model, path: str | Path) -> None:
 
     for op in graph_def.operators:
         layer = _find_layer_for_op(op, layer_map)
-        if layer is None or not isinstance(layer, Writable):
+        if layer is None or not isinstance(layer, types.Writable):
             continue
 
-        op_buf_writes, op_quant_writes = layer.collect_write_ops(op, graph_def.tensors)
+        op_buf_writes, op_quant_writes = layer.collect_write_ops(op)
         buffer_writes.extend(op_buf_writes)
         quant_writes.extend(op_quant_writes)
 

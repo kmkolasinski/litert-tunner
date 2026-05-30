@@ -6,7 +6,7 @@ parsing and Keras model building.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -129,3 +129,27 @@ class GraphDef:
     input_indices: tuple[int, ...]
     output_indices: tuple[int, ...]
     raw_model_bytes: bytes
+
+
+@runtime_checkable
+class Writable(Protocol):
+    """Protocol for Keras layers that know how to serialize themselves back to a flatbuffer.
+
+    Any layer that needs to persist updated parameters must implement this
+    protocol by providing a ``collect_write_ops`` method. The writer calls it
+    once per layer and applies the returned instructions to the flatbuffer.
+    """
+
+    def collect_write_ops(
+        self,
+        op: OperatorInfo,
+    ) -> tuple[list[BufferWriteOp], list[QuantizationWriteOp]]:
+        """Return flatbuffer write instructions for this layer.
+
+        Args:
+            op: The OperatorInfo that this layer was built from.
+
+        Returns:
+            A tuple of (buffer_writes, quantization_writes).
+        """
+        ...

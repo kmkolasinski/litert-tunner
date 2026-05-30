@@ -220,7 +220,6 @@ class TestMeanWriteOps:
         op_test_utils.assert_collect_write_ops(
             layer,
             op,
-            tensors,
             expected_buffer_writes=0,
             expected_quant_writes=2,
         )
@@ -231,7 +230,7 @@ class TestMeanWriteOps:
         layer, _ = op_test_utils.build_and_call(
             op, tensors, np.zeros((1, 4, 4, 3), dtype=np.float32)
         )
-        _, quant_writes = layer.collect_write_ops(op, tensors)
+        _, quant_writes = layer.collect_write_ops(op)
         op_test_utils.assert_quant_write_tensor_indices(
             quant_writes, {op.input_indices[0], op.output_indices[0]}
         )

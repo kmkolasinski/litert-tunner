@@ -107,7 +107,6 @@ def _map_padding(padding_code: int) -> str:
 def build_max_pool_2d(
     op: types.OperatorInfo,
     _tensors: tuple[types.TensorInfo, ...],
-    _graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
     """Build a QuantizedMaxPool2D layer from parsed TFLite operator info.
 

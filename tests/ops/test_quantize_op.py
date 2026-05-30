@@ -10,10 +10,11 @@ from __future__ import annotations
 import keras
 import numpy as np
 import pytest
+import tensorflow as tf
 from keras import ops
 
 from litert_tunner.graph import types
-from litert_tunner.ops import registry
+from litert_tunner.ops import quantize_op, registry, utils
 from tests.ops import op_test_utils
 
 # ---------------------------------------------------------------------------
@@ -195,7 +196,6 @@ class TestQuantizeWriteOps:
         op_test_utils.assert_collect_write_ops(
             layer,
             op,
-            tensors,
             expected_buffer_writes=0,
             expected_quant_writes=1,
         )
@@ -207,7 +207,6 @@ class TestQuantizeWriteOps:
         _, quant_writes = op_test_utils.assert_collect_write_ops(
             layer,
             op,
-            tensors,
             expected_buffer_writes=0,
             expected_quant_writes=1,
         )
@@ -217,7 +216,7 @@ class TestQuantizeWriteOps:
         """The emitted scale must match the layer's current scale weight."""
         op, tensors = quantize_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
-        _, quant_writes = layer.collect_write_ops(op, tensors)
+        _, quant_writes = layer.collect_write_ops(op)
         layer_scale = float(np.asarray(ops.convert_to_numpy(layer.scale)))
         assert quant_writes[0].scales == [pytest.approx(layer_scale)]
 
@@ -225,7 +224,7 @@ class TestQuantizeWriteOps:
         """The emitted zero_point must match the layer's current zero_point weight."""
         op, tensors = quantize_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
-        _, quant_writes = layer.collect_write_ops(op, tensors)
+        _, quant_writes = layer.collect_write_ops(op)
         layer_zp = int(np.round(np.asarray(ops.convert_to_numpy(layer.zero_point))))
         assert quant_writes[0].zero_points == [layer_zp]
 
@@ -338,7 +337,6 @@ class TestDequantizeWriteOps:
         op_test_utils.assert_collect_write_ops(
             layer,
             op,
-            tensors,
             expected_buffer_writes=0,
             expected_quant_writes=1,
         )
@@ -350,7 +348,6 @@ class TestDequantizeWriteOps:
         _, quant_writes = op_test_utils.assert_collect_write_ops(
             layer,
             op,
-            tensors,
             expected_buffer_writes=0,
             expected_quant_writes=1,
         )
@@ -360,7 +357,7 @@ class TestDequantizeWriteOps:
         """The emitted scale must match the layer's current scale weight."""
         op, tensors = dequantize_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 8), dtype=np.float32))
-        _, quant_writes = layer.collect_write_ops(op, tensors)
+        _, quant_writes = layer.collect_write_ops(op)
         layer_scale = float(np.asarray(ops.convert_to_numpy(layer.scale)))
         assert quant_writes[0].scales == [pytest.approx(layer_scale)]
 
@@ -368,7 +365,7 @@ class TestDequantizeWriteOps:
         """The emitted zero_point must match the layer's current zero_point weight."""
         op, tensors = dequantize_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 8), dtype=np.float32))
-        _, quant_writes = layer.collect_write_ops(op, tensors)
+        _, quant_writes = layer.collect_write_ops(op)
         layer_zp = int(np.round(np.asarray(ops.convert_to_numpy(layer.zero_point))))
         assert quant_writes[0].zero_points == [layer_zp]
 
@@ -422,3 +419,87 @@ class TestQuantizeDequantizeRoundtrip:
         expected = np.clip(np.round(input_data / scale) + zp, -128, 127)
         expected = (expected - zp) * scale
         np.testing.assert_allclose(d_out, expected, atol=1e-5)
+
+
+class TestQuantizeLayer:
+    """Direct tests for the Quantize Keras layer."""
+
+    def test__quantize_layer_call(self):
+        """Verify Quantize layer behavior."""
+        x = np.array([-1.2, -0.2, 0.3, 1.4], dtype=np.float32)
+        scale = 0.05
+        zero_point = -10.0
+
+        layer = quantize_op.Quantize(scale=scale, zero_point=zero_point)
+        layer.build((None, len(x)))
+
+        y = layer(x)
+        y_np = np.asarray(ops.convert_to_numpy(y))
+
+        # Replicate expected quantization in float
+        q_np = utils.quantize_int8(x, scale, int(zero_point))
+
+        # The layer outputs float32 values that are within INT8 range
+        assert np.allclose(y_np, q_np.astype(np.float32), atol=1e-5)
+
+    def test__quantize_layer_ste_gradient(self):
+        """Verify that gradients flow through the Quantize layer using STE."""
+        layer = quantize_op.Quantize(scale=0.1, zero_point=0.0)
+
+        inputs = keras.Input(shape=(3,))
+        outputs = layer(inputs)
+        model = keras.Model(inputs=inputs, outputs=outputs)
+
+        x_tensor = tf.constant([[0.15, -0.25, 0.05]], dtype="float32")
+        with tf.GradientTape() as tape:
+            tape.watch(x_tensor)
+            y_tensor = model(x_tensor)
+            loss = tf.reduce_sum(y_tensor**2)
+
+        grads = tape.gradient(loss, x_tensor)
+        grads_np = np.asarray(ops.convert_to_numpy(grads))
+        # STE gradient of quantize: d/dx [round(x/scale) + zp] = 1/scale
+        # So d(loss)/dx = 2 * y_tensor * (1/scale)
+        expected_grads = np.asarray(ops.convert_to_numpy(2 * y_tensor / 0.1))
+        assert np.allclose(grads_np, expected_grads, atol=0.05)
+
+    def test__quantize_layer_get_config(self):
+        """Verify get_config and serialization of Quantize layer."""
+        scale = 0.1
+        zero_point = 5.0
+        layer = quantize_op.Quantize(scale=scale, zero_point=zero_point, trainable=False)
+        config = layer.get_config()
+        assert config["scale"] == scale
+        assert config["zero_point"] == zero_point
+        assert not config["trainable"]
+
+
+class TestDequantizeLayer:
+    """Direct tests for the Dequantize Keras layer."""
+
+    def test__dequantize_layer_call(self):
+        """Verify Dequantize layer behavior."""
+        x = np.array([-20, -4, 6, 28], dtype=np.int8)
+        scale = 0.05
+        zero_point = -10.0
+
+        layer = quantize_op.Dequantize(scale=scale, zero_point=zero_point)
+        layer.build((None, len(x)))
+
+        y = layer(x)
+        y_np = np.asarray(ops.convert_to_numpy(y))
+
+        # Replicate with utils helper
+        deq_np = utils.dequantize_float(x, scale, int(zero_point))
+
+        assert np.allclose(y_np, deq_np, atol=1e-5)
+
+    def test__dequantize_layer_get_config(self):
+        """Verify get_config and serialization of Dequantize layer."""
+        scale = 0.1
+        zero_point = 5.0
+        layer = quantize_op.Dequantize(scale=scale, zero_point=zero_point, passthrough=True)
+        config = layer.get_config()
+        assert config["scale"] == scale
+        assert config["zero_point"] == zero_point
+        assert config["passthrough"] is True

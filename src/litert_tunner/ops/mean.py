@@ -12,17 +12,16 @@ from typing import TYPE_CHECKING
 import keras
 from keras import ops
 
-from litert_tunner.ops import registry
-from litert_tunner.quantization import fake_quant
+from litert_tunner.graph import types
+from litert_tunner.ops import registry, utils
 
 if TYPE_CHECKING:
-    from litert_tunner.graph import types
     from litert_tunner.ops.utils import TensorLike
 
     ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
 
 
-class QuantizedMean(keras.Layer):
+class QuantizedMean(keras.Layer, types.Writable):
     """Simulates TFLite's quantized MEAN op.
 
     The forward pass performs:
@@ -104,13 +103,13 @@ class QuantizedMean(keras.Layer):
             Output tensor after mean reduction and fake-quantization.
         """
         # 1. Dequantize input
-        input_float = fake_quant.dequantize_ste(x, self.input_scale, self.input_zero_point)
+        input_float = utils.dequantize_ste(x, self.input_scale, self.input_zero_point)
 
         # 2. Compute mean over specified axes
         output = ops.mean(input_float, axis=self._axis, keepdims=self._keep_dims)
 
         # 3. Quantize output to simulated INT8
-        return fake_quant.quantize_ste(output, self.output_scale, self.output_zero_point)
+        return utils.quantize_ste(output, self.output_scale, self.output_zero_point)
 
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
@@ -130,7 +129,6 @@ class QuantizedMean(keras.Layer):
     def collect_write_ops(
         self,
         op: types.OperatorInfo,
-        _tensors: tuple[types.TensorInfo, ...],
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
         """Return flatbuffer write instructions for the MEAN layer.
 
@@ -145,12 +143,10 @@ class QuantizedMean(keras.Layer):
         """
         quant_writes: list[types.QuantizationWriteOp] = []
         quant_writes.append(
-            fake_quant.make_quant_write_op(
-                op.input_indices[0], self.input_scale, self.input_zero_point
-            )
+            utils.make_quant_write_op(op.input_indices[0], self.input_scale, self.input_zero_point)
         )
         quant_writes.append(
-            fake_quant.make_quant_write_op(
+            utils.make_quant_write_op(
                 op.output_indices[0], self.output_scale, self.output_zero_point
             )
         )
@@ -161,7 +157,6 @@ class QuantizedMean(keras.Layer):
 def build_mean(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
-    _graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
     """Build a QuantizedMean layer from parsed TFLite operator info.
 

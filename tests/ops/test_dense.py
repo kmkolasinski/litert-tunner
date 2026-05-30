@@ -256,7 +256,6 @@ class TestDenseWriteOps:
         op_test_utils.assert_collect_write_ops(
             layer,
             op,
-            tensors,
             expected_buffer_writes=2,
             expected_quant_writes=3,
         )
@@ -265,7 +264,7 @@ class TestDenseWriteOps:
         """Buffer writes must target weight and bias tensor indices."""
         op, tensors = dense_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
-        buffer_writes, _ = layer.collect_write_ops(op, tensors)
+        buffer_writes, _ = layer.collect_write_ops(op)
         op_test_utils.assert_buffer_write_tensor_indices(
             buffer_writes, {op.input_indices[1], op.input_indices[2]}
         )
@@ -274,7 +273,7 @@ class TestDenseWriteOps:
         """Quant writes must target input, weight, and output tensor indices."""
         op, tensors = dense_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
-        _, quant_writes = layer.collect_write_ops(op, tensors)
+        _, quant_writes = layer.collect_write_ops(op)
         op_test_utils.assert_quant_write_tensor_indices(
             quant_writes, {op.input_indices[0], op.input_indices[1], op.output_indices[0]}
         )

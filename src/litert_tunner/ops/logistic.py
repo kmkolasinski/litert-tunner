@@ -7,17 +7,16 @@ from typing import TYPE_CHECKING
 import keras
 from keras import ops
 
-from litert_tunner.ops import registry
-from litert_tunner.quantization import fake_quant
+from litert_tunner.graph import types
+from litert_tunner.ops import registry, utils
 
 if TYPE_CHECKING:
-    from litert_tunner.graph import types
     from litert_tunner.ops.utils import TensorLike
 
     ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
 
 
-class QuantizedLogistic(keras.Layer):
+class QuantizedLogistic(keras.Layer, types.Writable):
     """Simulates TFLite's quantized LOGISTIC op.
 
     The forward pass performs:
@@ -73,11 +72,11 @@ class QuantizedLogistic(keras.Layer):
     def call(self, x: TensorLike) -> TensorLike:
         """Forward pass simulating quantized LOGISTIC."""
         # 1. Dequantize
-        input_float = fake_quant.dequantize_ste(x, self.input_scale, self.input_zero_point)
+        input_float = utils.dequantize_ste(x, self.input_scale, self.input_zero_point)
         # 2. Sigmoid
         output_float = ops.sigmoid(input_float)
         # 3. Quantize to simulated INT8
-        return fake_quant.quantize_ste(output_float, self.output_scale, self.output_zero_point)
+        return utils.quantize_ste(output_float, self.output_scale, self.output_zero_point)
 
     def get_config(self):
         config = super().get_config()
@@ -94,17 +93,14 @@ class QuantizedLogistic(keras.Layer):
     def collect_write_ops(
         self,
         op: types.OperatorInfo,
-        _tensors: tuple[types.TensorInfo, ...],
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
         """Return flatbuffer write instructions for the LOGISTIC layer."""
         quant_writes: list[types.QuantizationWriteOp] = []
         quant_writes.append(
-            fake_quant.make_quant_write_op(
-                op.input_indices[0], self.input_scale, self.input_zero_point
-            )
+            utils.make_quant_write_op(op.input_indices[0], self.input_scale, self.input_zero_point)
         )
         quant_writes.append(
-            fake_quant.make_quant_write_op(
+            utils.make_quant_write_op(
                 op.output_indices[0], self.output_scale, self.output_zero_point
             )
         )
@@ -115,7 +111,6 @@ class QuantizedLogistic(keras.Layer):
 def build_logistic(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
-    _graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
     """Build a QuantizedLogistic layer from parsed TFLite operator info."""
     input_tensor = tensors[op.input_indices[0]]
