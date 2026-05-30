@@ -166,8 +166,11 @@ class QuantizedDense(keras.Layer):
         # 4. Apply fused activation (before requantization)
         output = self._apply_fused_activation(output)
 
-        # 5. Fake-quantize output (quantize → dequantize with STE)
-        output = fake_quant._fake_quantize(output, self.output_scale, self.output_zero_point)
+        # 5. Quantize output to simulated INT8 (with STE for gradient flow)
+        # We use _quantize_ste (not _fake_quantize) so the output stays in simulated
+        # INT8 space. This ensures the next layer's dequantize step works correctly,
+        # and the final DEQUANTIZE op converts back to float32.
+        output = fake_quant._quantize_ste(output, self.output_scale, self.output_zero_point)
 
         return output
 

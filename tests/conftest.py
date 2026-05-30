@@ -44,32 +44,94 @@ def make_dense_tflite(temp_model_dir: Path) -> Callable:
         )(inputs)
         model = keras.Model(inputs=inputs, outputs=outputs)
 
-        # Define representative dataset for quantization calibration
-        def representative_dataset_gen():
-            for _ in range(100):
-                # Generates values within [-1.0, 1.0]
-                yield [np.random.uniform(-1.0, 1.0, (1, num_features)).astype(np.float32)]
-
-        # Convert to TFLite fully quantized INT8
-        converter = tf.lite.TFLiteConverter.from_keras_model(model)
-        converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        converter.representative_dataset = representative_dataset_gen
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-
-        if not float_io:
-            converter.inference_input_type = tf.int8
-            converter.inference_output_type = tf.int8
-
-        tflite_model = converter.convert()
-
         # Save to temp path
         output_path = temp_model_dir / f"dense_{num_units}_{activation}_{float_io}.tflite"
-        with open(output_path, "wb") as f:
-            f.write(tflite_model)
+        export_mlp_model((num_features,), model, float_io, output_path)
 
         return output_path
 
     return _make
+
+
+@pytest.fixture
+def make_mlp_tflite(temp_model_dir: Path) -> Callable:
+    """Fixture returning a function to create fully quantized INT8 FullyConnected TFLite models."""
+
+    def _make(
+        input_size: int = 8,
+        hidden_sizes: list[int] = [1],
+        use_bias: bool = True,
+        activation: str | None = None,
+        float_io: bool = False,
+        add_skip_connections: bool = False,
+        add_batchnorm: bool = False,
+        seed: int = 42,
+    ) -> Path:
+        np.random.seed(seed)
+        tf.random.set_seed(seed)
+
+        # Build Keras model
+        inputs = keras.Input(shape=(input_size,))
+        x = inputs
+        num_layers = len(hidden_sizes)
+        for layer_index, num_units in enumerate(hidden_sizes):
+            residual: Any = x
+            x = keras.layers.Dense(
+                units=num_units,
+                use_bias=use_bias,
+                activation=None,
+                kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
+                bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+            )(x)
+            if add_batchnorm:
+                x = keras.layers.BatchNormalization()(x)
+            # skip the last layer activation
+            if layer_index != num_layers - 1:
+                if activation is not None:
+                    x = keras.layers.Activation(activation)(x)
+            if add_skip_connections and residual.shape[-1] == num_units:
+                x = keras.layers.Add()([residual, x])
+
+        outputs = x
+        model = keras.Model(inputs=inputs, outputs=outputs)
+        model.summary()
+
+        # Save to temp path
+        sizes_str = "_".join(map(str, hidden_sizes))
+        output_path = (
+            temp_model_dir
+            / f"mlp_{sizes_str}_{activation}_{float_io}_{add_skip_connections}_{add_batchnorm}.tflite"  # noqa: E501
+        )
+        export_mlp_model((input_size,), model, float_io, output_path)
+
+        return output_path
+
+    return _make
+
+
+def export_mlp_model(
+    input_shape: tuple[int, ...], model: keras.Model, float_io: bool, output_path: Path
+):
+    def representative_dataset_gen():
+        for _ in range(100):
+            # Generates values within [-1.0, 1.0]
+            yield [np.random.uniform(-1.0, 1.0, input_shape).astype(np.float32)]
+
+    # Convert to TFLite fully quantized INT8
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    converter.representative_dataset = representative_dataset_gen
+    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+
+    if not float_io:
+        converter.inference_input_type = tf.int8
+        converter.inference_output_type = tf.int8
+
+    tflite_model = converter.convert()
+
+    # Save to temp path
+    with open(output_path, "wb") as f:
+        f.write(tflite_model)
 
 
 @pytest.fixture

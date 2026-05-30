@@ -41,9 +41,10 @@ def build_keras_model(graph_def: types.GraphDef) -> keras.Model:
         builder = registry.get_op_builder(op.op_type)
         layer = builder(op, graph_def.tensors, graph_def)
 
-        # Get all activation inputs for this operator (tensors with no static data)
         layer_inputs = [
-            tensor_symbols[idx] for idx in op.input_indices if graph_def.tensors[idx].data is None
+            tensor_symbols[idx]
+            for idx in op.input_indices
+            if idx >= 0 and graph_def.tensors[idx].data is None
         ]
 
         if not layer_inputs:

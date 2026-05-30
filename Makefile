@@ -11,8 +11,8 @@ venv: ## Creates a virtual environment using uv
 install: ## Installs the project in editable mode with dev dependencies
 	uv pip install -e ".[dev]"
 
-test: ## Runs the tests
-	python -m pytest
+test: ## Runs the tests with coverage and parallel execution
+	python -m pytest -n 4 --durations=20 --forked --cov=litert_tunner --cov-branch --cov-report=term --cov-report=html:test-results/htmlcov --no-cov-on-fail --cov-fail-under=70
 
 precommit: ## Runs the pre-commit hooks
 	pre-commit run --all-files

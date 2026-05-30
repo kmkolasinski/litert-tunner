@@ -38,15 +38,11 @@ def test__dense_no_activation(make_dense_tflite: Callable, run_interpreter: Call
     simulated_int8_inputs = np.round(inputs / input_scale) + input_zp
     simulated_int8_inputs = np.clip(simulated_int8_inputs, -128, 127).astype(np.float32)
 
+    # QuantizedDense outputs simulated INT8 values (float32 tensor with integer values)
     tunner_output_sim = tunner_model.predict(simulated_int8_inputs)
 
-    # Dequantized float32 output to INT8 to match Interpreter output
-    output_tensor = graph_def.tensors[graph_def.output_indices[0]]
-    output_scale = output_tensor.quantization.scales[0]
-    output_zp = output_tensor.quantization.zero_points[0]
-
-    tunner_output_int8 = np.round(tunner_output_sim / output_scale) + output_zp
-    tunner_output_int8 = np.clip(tunner_output_int8, -128, 127).astype(np.int8)
+    # Cast directly to int8 — the output is already in INT8 range
+    tunner_output_int8 = np.clip(np.round(tunner_output_sim), -128, 127).astype(np.int8)
 
     # They must match within atol=1
     np.testing.assert_allclose(tunner_output_int8, interpreter_output, atol=1, rtol=0)
@@ -70,14 +66,11 @@ def test__dense_multiple_units(make_dense_tflite: Callable, run_interpreter: Cal
     simulated_int8_inputs = np.round(inputs / input_scale) + input_zp
     simulated_int8_inputs = np.clip(simulated_int8_inputs, -128, 127).astype(np.float32)
 
+    # QuantizedDense outputs simulated INT8 values (float32 tensor with integer values)
     tunner_output_sim = tunner_model.predict(simulated_int8_inputs)
 
-    output_tensor = graph_def.tensors[graph_def.output_indices[0]]
-    output_scale = output_tensor.quantization.scales[0]
-    output_zp = output_tensor.quantization.zero_points[0]
-
-    tunner_output_int8 = np.round(tunner_output_sim / output_scale) + output_zp
-    tunner_output_int8 = np.clip(tunner_output_int8, -128, 127).astype(np.int8)
+    # Cast directly to int8 — the output is already in INT8 range
+    tunner_output_int8 = np.clip(np.round(tunner_output_sim), -128, 127).astype(np.int8)
 
     np.testing.assert_allclose(tunner_output_int8, interpreter_output, atol=1, rtol=0)
 
@@ -196,14 +189,24 @@ class TestDenseCall:
         op_test_utils.assert_output_shape(output, (2, 2))
 
     def test__dense_formula_matches_expected(self, dense_setup):
-        """Verify dense computation with fake quantization."""
+        """Verify dense computation produces correct simulated INT8 output.
+
+        With input=[-2, 1, 0, 3], input_scale=0.1, input_zp=-5:
+          dequantized = 0.1 * ([-2,1,0,3] - (-5)) = [0.3, 0.6, 0.5, 0.8]
+        With weight_scale=0.2, weight_zp=0:
+          dequantized_w = 0.2 * [[10,20,30,40],[-10,-20,-30,-40]]
+        Matmul + bias = [12.42, -12.42]
+        With output_scale=0.5, output_zp=10:
+          quantized = round(12.42/0.5) + 10 = 35
+          quantized = round(-12.42/0.5) + 10 = -15
+        """
         op, tensors = dense_setup
         input_data = np.array([[-2, 1, 0, 3]], dtype=np.float32)
 
         _, output = op_test_utils.build_and_call(op, tensors, input_data)
 
-        # Expected based on formulas:
-        expected = np.array([[12.5, -12.5]], dtype=np.float32)
+        # Expected: simulated INT8 values (quantized, not dequantized)
+        expected = np.array([[35.0, -15.0]], dtype=np.float32)
         np.testing.assert_allclose(output, expected, atol=1e-5)
 
 

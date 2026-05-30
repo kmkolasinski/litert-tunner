@@ -63,17 +63,8 @@ def build_dequantize(
     scale = float(input_quant.scales[0])
     zero_point = float(input_quant.zero_points[0])
 
-    # Check if the input tensor is produced by another operator in the graph
-    passthrough = False
-    if graph_def is not None:
-        for other_op in graph_def.operators:
-            if op.input_indices[0] in other_op.output_indices:
-                passthrough = True
-                break
-
     return fake_quant.Dequantize(
         scale=scale,
         zero_point=zero_point,
-        passthrough=passthrough,
         name=f"dequantize_{op.output_indices[0]}",
     )

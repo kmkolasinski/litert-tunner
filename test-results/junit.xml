@@ -1,1 +1,50 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="0" time="0.077" timestamp="2026-05-30T13:24:04.083257+02:00" hostname="FORM-CPZVRQ3" /></testsuites>
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="0.744" timestamp="2026-05-30T14:24:09.698752+02:00" hostname="FORM-CPZVRQ3"><testcase classname="tests.networks.test_mlp" name="test__mlp_multiple_layers_forward" time="0.592"><failure message="KeyError: &quot;Unsupported op type 'LOGISTIC'. Registered ops: [DEQUANTIZE, FULLY_CONNECTED, QUANTIZE]&quot;">make_mlp_tflite = &lt;function make_mlp_tflite.&lt;locals&gt;._make at 0x706231e4b240&gt;
+run_interpreter = &lt;function run_interpreter.&lt;locals&gt;._run at 0x706231e4b380&gt;
+
+    def test__mlp_multiple_layers_forward(make_mlp_tflite: Callable, run_interpreter: Callable):
+        model_path = make_mlp_tflite(
+            input_size=32,
+            hidden_sizes=[32, 16, 8],
+            use_bias=True,
+            activation="swish",
+            float_io=True,
+        )
+    
+        x_train = np.random.uniform(-1.0, 1.0, (22, 32)).astype(np.float32)
+        litert_outputs = run_interpreter(model_path, x_train)
+    
+        # compare original LiteRT model with keras parsed
+&gt;       keras_model = litert_tunner.load_model(str(model_path))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/networks/test_mlp.py:44: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/litert_tunner/__init__.py:20: in load_model
+    return graph.build_keras_model(graph_def)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/litert_tunner/graph/builder.py:41: in build_keras_model
+    builder = registry.get_op_builder(op.op_type)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+op_type = 'LOGISTIC'
+
+    def get_op_builder(op_type: str) -&gt; OpBuilder:
+        """Look up a registered op builder by TFLite op name.
+    
+        Args:
+            op_type: TFLite operator type string.
+    
+        Returns:
+            The registered builder function.
+    
+        Raises:
+            KeyError: If no builder is registered for the given op type.
+        """
+        if op_type not in _REGISTRY:
+            registered = ", ".join(sorted(_REGISTRY.keys()))
+            msg = f"Unsupported op type '{op_type}'. Registered ops: [{registered}]"
+&gt;           raise KeyError(msg)
+E           KeyError: "Unsupported op type 'LOGISTIC'. Registered ops: [DEQUANTIZE, FULLY_CONNECTED, QUANTIZE]"
+
+src/litert_tunner/ops/registry.py:67: KeyError</failure></testcase></testsuite></testsuites>

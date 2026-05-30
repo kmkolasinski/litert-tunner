@@ -55,16 +55,7 @@ env_files = [
 
 addopts = [
     "-vv",
-    "-n",
-    "4",
-    "--durations=20",
-    "--forked",
-    "--cov-branch",
-    "--cov-report=term",
-    "--cov-report=html:test-results/htmlcov",
-    "--no-cov-on-fail",
     "--junit-xml=test-results/junit.xml",
-    "--cov-fail-under=70",
     "--randomly-seed=32",
 ]
 
