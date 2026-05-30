@@ -46,7 +46,7 @@ def make_dense_tflite(temp_model_dir: Path) -> Callable:
 
         # Save to temp path
         output_path = temp_model_dir / f"dense_{num_units}_{activation}_{float_io}.tflite"
-        export_mlp_model((num_features,), model, float_io, output_path)
+        export_quantized_tflite_model((num_features,), model, float_io, output_path)
 
         return output_path
 
@@ -102,20 +102,137 @@ def make_mlp_tflite(temp_model_dir: Path) -> Callable:
             temp_model_dir
             / f"mlp_{sizes_str}_{activation}_{float_io}_{add_skip_connections}_{add_batchnorm}.tflite"  # noqa: E501
         )
-        export_mlp_model((input_size,), model, float_io, output_path)
+        export_quantized_tflite_model((input_size,), model, float_io, output_path)
 
         return output_path
 
     return _make
 
 
-def export_mlp_model(
+@pytest.fixture
+def make_resnet_tflite(temp_model_dir: Path) -> Callable:
+    """Fixture returning a function to create fully quantized INT8 ResNet-like CNN TFLite models."""
+
+    def _make(
+        input_shape: tuple[int, int, int] = (8, 8, 3),
+        filters: list[int] = [8, 8],
+        kernel_size: int | tuple[int, int] = 3,
+        use_bias: bool = True,
+        activation: str | None = None,
+        float_io: bool = False,
+        add_skip_connections: bool = True,
+        add_batchnorm: bool = False,
+        pooling_type: str | None = None,
+        seed: int = 42,
+    ) -> Path:
+        np.random.seed(seed)
+        tf.random.set_seed(seed)
+
+        # Build Keras model
+        inputs = keras.Input(shape=input_shape)
+        x = inputs
+
+        # First Conv layer
+        x = keras.layers.Conv2D(
+            filters=filters[0],
+            kernel_size=kernel_size,
+            padding="same",
+            use_bias=use_bias,
+            kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
+            bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+        )(x)
+        if add_batchnorm:
+            x = keras.layers.BatchNormalization()(x)
+        if activation is not None:
+            x = keras.layers.Activation(activation)(x)
+
+        if pooling_type == "max":
+            x = keras.layers.MaxPooling2D(pool_size=(2, 2), padding="same")(x)
+        elif pooling_type == "avg":
+            x = keras.layers.AveragePooling2D(pool_size=(2, 2), padding="same")(x)
+
+        # Build subsequent layers
+        for f in filters[1:]:
+            residual = x
+
+            # Conv block
+            x = keras.layers.Conv2D(
+                filters=f,
+                kernel_size=kernel_size,
+                padding="same",
+                use_bias=use_bias,
+                kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
+                bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+            )(x)
+            if add_batchnorm:
+                x = keras.layers.BatchNormalization()(x)
+            if activation is not None:
+                x = keras.layers.Activation(activation)(x)
+
+            x = keras.layers.Conv2D(
+                filters=f,
+                kernel_size=kernel_size,
+                padding="same",
+                use_bias=use_bias,
+                kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
+                bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+            )(x)
+            if add_batchnorm:
+                x = keras.layers.BatchNormalization()(x)
+
+            if add_skip_connections:
+                # If channel dimensions differ, project residual
+                if residual.shape[-1] != f:
+                    residual = keras.layers.Conv2D(
+                        filters=f,
+                        kernel_size=1,
+                        padding="same",
+                        use_bias=use_bias,
+                        kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
+                        bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+                    )(residual)
+                    if add_batchnorm:
+                        residual = keras.layers.BatchNormalization()(residual)
+                x = keras.layers.Add()([residual, x])
+
+            if activation is not None:
+                x = keras.layers.Activation(activation)(x)
+
+        # Classifier head: global pooling + Dense to logits
+        x = keras.layers.GlobalAveragePooling2D()(x)
+        outputs = keras.layers.Dense(
+            units=10,
+            use_bias=use_bias,
+            kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
+            bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+        )(x)
+
+        model = keras.Model(inputs=inputs, outputs=outputs)
+        model.summary()
+
+        # Save to temp path
+        filters_str = "_".join(map(str, filters))
+        shape_str = "_".join(map(str, input_shape))
+        output_path = (
+            temp_model_dir
+            / f"resnet_{shape_str}_{filters_str}_{activation}_{float_io}_{add_skip_connections}_{add_batchnorm}_{pooling_type}.tflite"  # noqa: E501
+        )
+        export_quantized_tflite_model(input_shape, model, float_io, output_path)
+
+        return output_path
+
+    return _make
+
+
+def export_quantized_tflite_model(
     input_shape: tuple[int, ...], model: keras.Model, float_io: bool, output_path: Path
 ):
     def representative_dataset_gen():
+        # Get shape from model input shape, replacing None or dynamic dimensions with 1
+        rep_shape = [1 if d is None else d for d in model.input_shape]
         for _ in range(100):
             # Generates values within [-1.0, 1.0]
-            yield [np.random.uniform(-1.0, 1.0, input_shape).astype(np.float32)]
+            yield [np.random.uniform(-1.0, 1.0, rep_shape).astype(np.float32)]
 
     # Convert to TFLite fully quantized INT8
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
