@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import typing
 
-import keras
 import numpy as np
 import pytest
 import tensorflow as tf
@@ -17,7 +16,7 @@ from tests.ops import op_test_utils
 
 def _to_numpy(x: typing.Any) -> np.ndarray:
     """Helper to convert to numpy and cast to np.ndarray for Pyright."""
-    return typing.cast(np.ndarray, ops.convert_to_numpy(x))
+    return typing.cast("np.ndarray", ops.convert_to_numpy(x))
 
 
 def test__expand_dims_if_not_scalar():

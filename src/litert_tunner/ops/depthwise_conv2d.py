@@ -279,20 +279,14 @@ class QuantizedDepthwiseConv2D(keras.Layer, types.Writable):
         # Write quantization params
         input_tensor_idx = op_inputs[0]
         quant_writes.append(
-            utils.make_quant_write_op(
-                input_tensor_idx, self.input_scale, self.input_zero_point
-            )
+            utils.make_quant_write_op(input_tensor_idx, self.input_scale, self.input_zero_point)
         )
         quant_writes.append(
-            utils.make_quant_write_op(
-                weight_tensor_idx, self.weight_scale, self.weight_zero_point
-            )
+            utils.make_quant_write_op(weight_tensor_idx, self.weight_scale, self.weight_zero_point)
         )
         output_tensor_idx = op_outputs[0]
         quant_writes.append(
-            utils.make_quant_write_op(
-                output_tensor_idx, self.output_scale, self.output_zero_point
-            )
+            utils.make_quant_write_op(output_tensor_idx, self.output_scale, self.output_zero_point)
         )
 
         return buffer_writes, quant_writes
