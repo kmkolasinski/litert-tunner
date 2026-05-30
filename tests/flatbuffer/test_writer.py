@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING
 
+import keras
 import numpy as np
 import pytest
 from ai_edge_litert.interpreter import Interpreter
@@ -12,14 +13,15 @@ from ai_edge_litert.interpreter import Interpreter
 import litert_tunner
 from litert_tunner import flatbuffer
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 class TestSaveTfliteValidation:
     """Tests for save_tflite input validation."""
 
     def test__rejects_model_without_graph_def(self):
         """save_tflite must raise ValueError for a model not created by load_model."""
-        import keras
-
         model = keras.Sequential([keras.layers.Dense(2, input_shape=(4,))])
         with pytest.raises(ValueError, match="not created by litert_tunner"):
             flatbuffer.save_tflite(model, "/tmp/dummy.tflite")
@@ -86,7 +88,8 @@ class TestSaveTfliteRoundTrip:
         tunner_model = litert_tunner.load_model(str(model_path))
         litert_tunner.save_model(tunner_model, str(saved_path))
 
-        inputs = np.random.uniform(-1.0, 1.0, (10, 4)).astype(np.float32)
+        rng = np.random.default_rng(42)
+        inputs = rng.uniform(-1.0, 1.0, (10, 4)).astype(np.float32)
         original_out = run_interpreter(model_path, inputs)
         saved_out = run_interpreter(saved_path, inputs)
         np.testing.assert_array_equal(original_out, saved_out)
@@ -113,7 +116,8 @@ class TestSaveTfliteRoundTrip:
         tunner_model = litert_tunner.load_model(str(model_path))
         litert_tunner.save_model(tunner_model, str(saved_path))
 
-        inputs = np.random.uniform(-1.0, 1.0, (10, 4)).astype(np.float32)
+        rng = np.random.default_rng(42)
+        inputs = rng.uniform(-1.0, 1.0, (10, 4)).astype(np.float32)
         original_out = run_interpreter(model_path, inputs)
         saved_out = run_interpreter(saved_path, inputs)
         # Allow small INT8 rounding error from quantization param round-trip
@@ -137,7 +141,8 @@ class TestSaveTfliteRoundTrip:
         tunner_model = litert_tunner.load_model(str(model_path))
         litert_tunner.save_model(tunner_model, str(saved_path))
 
-        inputs = np.random.uniform(-1.0, 1.0, (10, 8)).astype(np.float32)
+        rng = np.random.default_rng(42)
+        inputs = rng.uniform(-1.0, 1.0, (10, 8)).astype(np.float32)
         original_out = run_interpreter(model_path, inputs)
         saved_out = run_interpreter(saved_path, inputs)
         np.testing.assert_array_equal(original_out, saved_out)
@@ -178,7 +183,8 @@ class TestSaveTfliteFloatIO:
         tunner_model = litert_tunner.load_model(str(model_path))
         litert_tunner.save_model(tunner_model, str(saved_path))
 
-        inputs = np.random.uniform(-1.0, 1.0, (10, 4)).astype(np.float32)
+        rng = np.random.default_rng(42)
+        inputs = rng.uniform(-1.0, 1.0, (10, 4)).astype(np.float32)
         original_out = run_interpreter(model_path, inputs)
         saved_out = run_interpreter(saved_path, inputs)
         # Float32 output has larger numerical tolerance due to dequant precision
@@ -211,7 +217,8 @@ class TestSaveTfliteBiasModification:
         saved_path = tmp_path / "modified_bias.tflite"
         litert_tunner.save_model(tunner_model, str(saved_path))
 
-        inputs = np.random.uniform(-1.0, 1.0, (10, 4)).astype(np.float32)
+        rng = np.random.default_rng(42)
+        inputs = rng.uniform(-1.0, 1.0, (10, 4)).astype(np.float32)
         original_out = run_interpreter(model_path, inputs)
         modified_out = run_interpreter(saved_path, inputs)
 
@@ -274,7 +281,7 @@ class TestSaveTfliteWeightPreservation:
         saved_graph = flatbuffer.parse_tflite(saved_path)
 
         # Compare weight tensors from FULLY_CONNECTED ops
-        for orig_op, saved_op in zip(original_graph.operators, saved_graph.operators):
+        for orig_op, saved_op in zip(original_graph.operators, saved_graph.operators, strict=False):
             if orig_op.op_type == "FULLY_CONNECTED":
                 orig_weight = original_graph.tensors[orig_op.input_indices[1]]
                 saved_weight = saved_graph.tensors[saved_op.input_indices[1]]
@@ -303,7 +310,7 @@ class TestSaveTfliteQuantizationParams:
 
         saved_graph = flatbuffer.parse_tflite(saved_path)
 
-        for orig_t, saved_t in zip(original_graph.tensors, saved_graph.tensors):
+        for orig_t, saved_t in zip(original_graph.tensors, saved_graph.tensors, strict=False):
             if orig_t.quantization is not None and saved_t.quantization is not None:
                 np.testing.assert_allclose(
                     orig_t.quantization.scales,
@@ -329,7 +336,7 @@ class TestSaveTfliteQuantizationParams:
 
         saved_graph = flatbuffer.parse_tflite(saved_path)
 
-        for orig_t, saved_t in zip(original_graph.tensors, saved_graph.tensors):
+        for orig_t, saved_t in zip(original_graph.tensors, saved_graph.tensors, strict=False):
             if orig_t.quantization is not None and saved_t.quantization is not None:
                 np.testing.assert_array_equal(
                     orig_t.quantization.zero_points,
@@ -422,7 +429,7 @@ class TestSaveTfliteGraphTopologyPreservation:
         litert_tunner.save_model(tunner_model, str(saved_path))
 
         saved_graph = flatbuffer.parse_tflite(saved_path)
-        for orig_t, saved_t in zip(original_graph.tensors, saved_graph.tensors):
+        for orig_t, saved_t in zip(original_graph.tensors, saved_graph.tensors, strict=False):
             assert orig_t.shape == saved_t.shape, (
                 f"Shape changed for tensor '{orig_t.name}': {orig_t.shape} → {saved_t.shape}"
             )
@@ -441,7 +448,7 @@ class TestSaveTfliteGraphTopologyPreservation:
         litert_tunner.save_model(tunner_model, str(saved_path))
 
         saved_graph = flatbuffer.parse_tflite(saved_path)
-        for orig_t, saved_t in zip(original_graph.tensors, saved_graph.tensors):
+        for orig_t, saved_t in zip(original_graph.tensors, saved_graph.tensors, strict=False):
             assert orig_t.dtype == saved_t.dtype, (
                 f"Dtype changed for tensor '{orig_t.name}': {orig_t.dtype} → {saved_t.dtype}"
             )

@@ -129,14 +129,16 @@ class TestQuantizeCall:
     def test__output_shape_matches_input(self, quantize_setup):
         """Output shape must equal input shape (quantize doesn't change shape)."""
         op, tensors = quantize_setup
-        input_data = np.random.uniform(-1.0, 1.0, (2, 4)).astype(np.float32)
-        layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (2, 4)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
         op_test_utils.assert_output_shape(output, (2, 4))
 
     def test__output_values_in_int8_range(self, quantize_setup):
         """Output values must be clamped to [-128, 127]."""
         op, tensors = quantize_setup
-        input_data = np.random.uniform(-10.0, 10.0, (5, 4)).astype(np.float32)
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-10.0, 10.0, (5, 4)).astype(np.float32)
         _, output = op_test_utils.build_and_call(op, tensors, input_data)
         assert np.all(output >= -128.0), f"Min value {output.min()} < -128"
         assert np.all(output <= 127.0), f"Max value {output.max()} > 127"
@@ -400,7 +402,7 @@ class TestQuantizeDequantizeRoundtrip:
         q_op = op_test_utils.make_operator(
             op_type="QUANTIZE", input_indices=(0,), output_indices=(1,)
         )
-        q_layer, q_out = op_test_utils.build_and_call(
+        _q_layer, q_out = op_test_utils.build_and_call(
             q_op, (t0, t1, t2), np.array([[0.5, -1.0, 2.0, -5.0]], dtype=np.float32)
         )
 

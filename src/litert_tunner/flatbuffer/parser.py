@@ -44,7 +44,7 @@ _NUMPY_DTYPE_MAP: dict[int, np.dtype] = {
 }
 
 # Mapping from BuiltinOptions type codes to their tflite option classes.
-# Covers ops from Phases 1–5 (Dense, Conv, Pooling, Reshape, Normalization,
+# Covers ops from Phases 1-5 (Dense, Conv, Pooling, Reshape, Normalization,
 # Skip connections, Softmax, Concatenation, etc.) plus common utility ops.
 _BUILTIN_OPTIONS_MAP: dict[int, type] = {
     # Phase 1: Dense / FullyConnected
@@ -139,7 +139,8 @@ def _map_tensor_type(tensor_type_code: int) -> str:
     """
     if tensor_type_code in _TENSOR_TYPE_MAP:
         return _TENSOR_TYPE_MAP[tensor_type_code]
-    raise ValueError(f"Unsupported tensor type: {tensor_type_code}")
+    msg = f"Unsupported tensor type: {tensor_type_code}"
+    raise ValueError(msg)
 
 
 def get_numpy_dtype(tensor_type_code: int) -> np.dtype:
@@ -156,7 +157,8 @@ def get_numpy_dtype(tensor_type_code: int) -> np.dtype:
     """
     if tensor_type_code in _NUMPY_DTYPE_MAP:
         return _NUMPY_DTYPE_MAP[tensor_type_code]
-    raise ValueError(f"Unsupported tensor type: {tensor_type_code}")
+    msg = f"Unsupported tensor type: {tensor_type_code}"
+    raise ValueError(msg)
 
 
 def _parse_builtin_options(op: tflite.Operator) -> dict:
@@ -199,7 +201,7 @@ def _parse_builtin_options(op: tflite.Operator) -> dict:
     return options
 
 
-def parse_tflite(path: str | Path) -> types.GraphDef:
+def parse_tflite(path: str | Path) -> types.GraphDef:  # noqa: C901, PLR0912, PLR0915
     """Parse a .tflite file into an internal graph representation.
 
     Args:
@@ -213,7 +215,7 @@ def parse_tflite(path: str | Path) -> types.GraphDef:
         FileNotFoundError: If the file does not exist.
         ValueError: If the model has no subgraphs or contains unsupported types.
     """
-    with open(path, "rb") as f:
+    with Path(path).open("rb") as f:
         raw_bytes = f.read()
 
     buf = bytearray(raw_bytes)
@@ -276,7 +278,7 @@ def parse_tflite(path: str | Path) -> types.GraphDef:
                     tensor_data = np.frombuffer(data_np.tobytes(), dtype=dtype).copy()
                     if shape:
                         tensor_data = tensor_data.reshape(shape)
-                except Exception:
+                except (ValueError, TypeError):
                     pass
 
         tensors.append(
@@ -300,7 +302,8 @@ def parse_tflite(path: str | Path) -> types.GraphDef:
         opcode_idx = op_t.OpcodeIndex()
         opcode_t = model.OperatorCodes(opcode_idx)
         if opcode_t is None:
-            raise ValueError(f"OperatorCode at index {opcode_idx} is None")
+            msg = f"OperatorCode at index {opcode_idx} is None"
+            raise ValueError(msg)
         op_type = get_op_code_name(opcode_t)
 
         inputs_np = op_t.InputsAsNumpy()

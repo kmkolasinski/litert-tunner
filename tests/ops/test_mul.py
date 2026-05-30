@@ -55,11 +55,12 @@ class TestMulBuild:
 class TestMulCall:
     def test__output_shape_matches_expected(self, mul_setup):
         op, tensors = mul_setup
+        rng = np.random.default_rng(42)
         input_data = [
-            np.random.uniform(-1.0, 1.0, (1, 4)).astype(np.float32),
-            np.random.uniform(-1.0, 1.0, (1, 4)).astype(np.float32)
+            rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32),
+            rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32),
         ]
-        layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
         op_test_utils.assert_output_shape(output, (1, 4))
 
     def test__mul_formula_matches_expected(self, mul_setup):
@@ -79,9 +80,7 @@ class TestMulTrainableWeights:
         op, tensors = mul_setup
         inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
-        op_test_utils.assert_trainable_weight_names(
-            layer, {"output_scale", "output_zero_point"}
-        )
+        op_test_utils.assert_trainable_weight_names(layer, {"output_scale", "output_zero_point"})
 
     def test__non_trainable_weights(self, mul_setup):
         op, tensors = mul_setup

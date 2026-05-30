@@ -17,7 +17,7 @@ def logistic_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
         name="input_int8", index=0, shape=(1, 4), dtype=types.DTYPE_INT8, quantization=input_quant
     )
 
-    output_quant = op_test_utils.make_quant_params(scales=[1/256.0], zero_points=[-128])
+    output_quant = op_test_utils.make_quant_params(scales=[1 / 256.0], zero_points=[-128])
     output_tensor = op_test_utils.make_tensor(
         name="output_int8", index=1, shape=(1, 4), dtype=types.DTYPE_INT8, quantization=output_quant
     )
@@ -50,17 +50,18 @@ class TestLogisticBuild:
 class TestLogisticCall:
     def test__output_shape_matches_expected(self, logistic_setup):
         op, tensors = logistic_setup
-        input_data = np.random.uniform(-1.0, 1.0, (1, 4)).astype(np.float32)
-        layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
         op_test_utils.assert_output_shape(output, (1, 4))
 
     def test__logistic_formula_matches_expected(self, logistic_setup):
         """Verify logistic computation produces correct simulated INT8 output."""
         op, tensors = logistic_setup
         input_data = np.array([[-5, 5, -15, 15]], dtype=np.float32)
-        
+
         _, output = op_test_utils.build_and_call(op, tensors, input_data)
-        
+
         deq = np.array([[0.0, 1.0, -1.0, 2.0]], dtype=np.float32)
         sigm = 1.0 / (1.0 + np.exp(-deq))
         expected = np.round(sigm * 256.0) - 128.0
@@ -73,9 +74,7 @@ class TestLogisticTrainableWeights:
         op, tensors = logistic_setup
         inputs = np.zeros((1, 4), dtype=np.float32)
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
-        op_test_utils.assert_trainable_weight_names(
-            layer, set()
-        )
+        op_test_utils.assert_trainable_weight_names(layer, set())
 
     def test__non_trainable_weights(self, logistic_setup):
         op, tensors = logistic_setup

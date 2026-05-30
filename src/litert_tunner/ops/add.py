@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import keras
 from keras import ops
 
-from litert_tunner.graph import types
 from litert_tunner.ops import registry, utils
 from litert_tunner.quantization import fake_quant
+
+if TYPE_CHECKING:
+    from litert_tunner.graph import types
+    from litert_tunner.ops.utils import TensorLike
+
+    ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
 
 
 class QuantizedAdd(keras.Layer):
@@ -43,7 +50,7 @@ class QuantizedAdd(keras.Layer):
         self._output_zero_point = output_zero_point
         self._fused_activation = fused_activation
 
-    def build(self, input_shape):
+    def build(self, input_shape: ShapeLike) -> None:
         """Create quantization params."""
         self.input1_scale = self.add_weight(
             name="input1_scale",
@@ -85,7 +92,7 @@ class QuantizedAdd(keras.Layer):
         )
         super().build(input_shape)
 
-    def call(self, inputs):
+    def call(self, inputs: tuple[TensorLike, TensorLike] | list[TensorLike]) -> TensorLike:
         """Forward pass simulating quantized ADD."""
         x1, x2 = inputs
         # 1. Dequantize
@@ -116,7 +123,7 @@ class QuantizedAdd(keras.Layer):
     def collect_write_ops(
         self,
         op: types.OperatorInfo,
-        tensors: tuple[types.TensorInfo, ...],
+        _tensors: tuple[types.TensorInfo, ...],
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
         """Return flatbuffer write instructions for the ADD layer."""
         quant_writes: list[types.QuantizationWriteOp] = []
@@ -142,7 +149,7 @@ class QuantizedAdd(keras.Layer):
 def build_add(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
-    graph_def: types.GraphDef | None = None,
+    _graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
     """Build a QuantizedAdd layer from parsed TFLite operator info."""
     input1_tensor = tensors[op.input_indices[0]]

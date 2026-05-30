@@ -1,6 +1,6 @@
-"""FullyConnected (Dense) op implementation for litert_tunner.
+"""Conv2D op implementation for litert_tunner.
 
-Simulates TFLite's quantized FullyConnected op as a Keras layer.
+Simulates TFLite's quantized Conv2D op as a Keras layer.
 The forward pass replicates the integer arithmetic in float32,
 enabling gradient flow through trainable parameters (bias, scales,
 zero-points).
@@ -16,36 +16,48 @@ from keras import ops
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry, utils
-from litert_tunner.quantization import fake_quant
 
 if typing.TYPE_CHECKING:
     from litert_tunner.ops.utils import TensorLike
 
     ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
+from litert_tunner.quantization import fake_quant
+
+# TFLite padding integer codes
+_PADDING_SAME = 0
+_PADDING_VALID = 1
+
+_PADDING_MAP: dict[int, str] = {
+    _PADDING_SAME: "same",
+    _PADDING_VALID: "valid",
+}
 
 
-class QuantizedDense(keras.Layer):
-    """Simulates TFLite's quantized FullyConnected op.
+class QuantizedConv2D(keras.Layer):
+    """Simulates TFLite's quantized Conv2D op.
 
     The forward pass performs:
         1. Dequantize INT8 input to float32
-        2. Dequantize INT8 weights to float32
-        3. Matrix multiply + float32 bias
+        2. Dequantize INT8 weights to float32 (per-channel)
+        3. Conv2D + float32 bias
         4. Apply fused activation (if any)
-        5. Fake-quantize output (quantize → dequantize with STE)
+        5. Fake-quantize output (quantize with STE)
 
     Trainable parameters: bias, output_scale, output_zero_point.
     Frozen parameters: weight_int8, input/weight scales and zero-points.
 
     Args:
-        weight_int8: INT8 weight values as numpy array, shape (out, in).
-        bias_float: Float32 bias values, shape (out,).
+        weight_int8: INT8 weight values, shape (out_ch, kH, kW, in_ch).
+        bias_float: Float32 bias values, shape (out_ch,).
         input_scale: Scale of the input activation tensor.
         input_zero_point: Zero point of the input activation tensor.
-        weight_scale: Scale of the weight tensor (scalar for per-tensor).
-        weight_zero_point: Zero point of the weight tensor.
+        weight_scale: Per-channel weight scales, shape (out_ch,) or scalar.
+        weight_zero_point: Per-channel weight zero points, shape (out_ch,) or scalar.
         output_scale: Scale of the output activation tensor.
         output_zero_point: Zero point of the output activation tensor.
+        strides: Convolution strides as (sH, sW).
+        padding: Padding string, "same" or "valid".
+        dilation_rate: Dilation rate as (dH, dW).
         fused_activation: TFLite fused activation code (0=none, 1=relu, 3=relu6).
         name: Layer name.
     """
@@ -60,6 +72,9 @@ class QuantizedDense(keras.Layer):
         weight_zero_point: float | np.ndarray,
         output_scale: float,
         output_zero_point: float,
+        strides: tuple[int, int] = (1, 1),
+        padding: str = "same",
+        dilation_rate: tuple[int, int] = (1, 1),
         fused_activation: int = utils.FUSED_ACTIVATION_NONE,
         **kwargs,
     ):
@@ -72,6 +87,9 @@ class QuantizedDense(keras.Layer):
         self._weight_zero_point = weight_zero_point
         self._output_scale = output_scale
         self._output_zero_point = output_zero_point
+        self._strides = strides
+        self._padding = padding
+        self._dilation_rate = dilation_rate
         self._fused_activation = fused_activation
 
     def build(self, input_shape: ShapeLike) -> None:
@@ -108,7 +126,7 @@ class QuantizedDense(keras.Layer):
             trainable=False,
         )
 
-        # Weight quantization params (frozen)
+        # Weight quantization params (frozen, may be per-channel)
         weight_scale_arr = np.asarray(self._weight_scale)
         self.weight_scale = self.add_weight(
             name="weight_scale",
@@ -141,34 +159,44 @@ class QuantizedDense(keras.Layer):
         super().build(input_shape)
 
     def call(self, x: TensorLike) -> TensorLike:
-        """Forward pass simulating TFLite's quantized FullyConnected.
+        """Forward pass simulating TFLite's quantized Conv2D.
 
         Args:
-            x: Input tensor. Can be float32 (pre-dequantized) or
-               simulated INT8 values in float32.
+            x: Input tensor of shape (batch, H, W, C_in).
 
         Returns:
-            Output tensor after fake-quantized dense computation.
+            Output tensor after fake-quantized convolution.
         """
         # 1. Dequantize input: float = scale * (int8 - zero_point)
         input_float = fake_quant.dequantize_ste(x, self.input_scale, self.input_zero_point)
 
-        # 2. Dequantize weights: float = scale * (int8 - zero_point)
-        scale_expanded = utils.expand_dims_if_not_scalar(self.weight_scale, 1)
-        zp_expanded = utils.expand_dims_if_not_scalar(self.weight_zero_point, 1)
-        weight_float = fake_quant.dequantize_ste(self.weight_int8, scale_expanded, zp_expanded)
+        # 2. Dequantize weights (per-channel along output channel axis 0)
+        # TFLite Conv2D weight shape: (out_ch, kH, kW, in_ch)
+        # Scale shape: (out_ch,) → expand to (out_ch, 1, 1, 1)
+        weight_scale = self.weight_scale
+        weight_zp = self.weight_zero_point
+        if len(weight_scale.shape) > 0:
+            weight_scale = ops.reshape(weight_scale, (-1, 1, 1, 1))
+            weight_zp = ops.reshape(weight_zp, (-1, 1, 1, 1))
+        weight_float = fake_quant.dequantize_ste(self.weight_int8, weight_scale, weight_zp)
 
-        # 3. Matmul + bias (in float32, simulating INT32 accumulation)
-        # TFLite FullyConnected: output = input @ weight^T + bias
-        output = ops.matmul(input_float, ops.transpose(weight_float)) + self.bias
+        # 3. Conv2D + bias
+        # Keras conv expects kernel shape (kH, kW, in_ch, out_ch) but TFLite stores
+        # weights as (out_ch, kH, kW, in_ch). Transpose to Keras format.
+        kernel = ops.transpose(weight_float, (1, 2, 3, 0))
+        output = ops.conv(
+            input_float,
+            kernel,
+            strides=typing.cast("typing.Any", self._strides),
+            padding=self._padding,
+            dilation_rate=typing.cast("typing.Any", self._dilation_rate),
+        )
+        output = output + self.bias
 
         # 4. Apply fused activation (before requantization)
         output = utils.apply_fused_activation(output, self._fused_activation)
 
         # 5. Quantize output to simulated INT8 (with STE for gradient flow)
-        # We use quantize_ste (not _fake_quantize) so the output stays in simulated
-        # INT8 space. This ensures the next layer's dequantize step works correctly,
-        # and the final DEQUANTIZE op converts back to float32.
         return fake_quant.quantize_ste(output, self.output_scale, self.output_zero_point)
 
     def get_config(self):
@@ -182,6 +210,9 @@ class QuantizedDense(keras.Layer):
                 "weight_zero_point": self._weight_zero_point,
                 "output_scale": self._output_scale,
                 "output_zero_point": self._output_zero_point,
+                "strides": self._strides,
+                "padding": self._padding,
+                "dilation_rate": self._dilation_rate,
                 "fused_activation": self._fused_activation,
             }
         )
@@ -192,7 +223,7 @@ class QuantizedDense(keras.Layer):
         op: types.OperatorInfo,
         _tensors: tuple[types.TensorInfo, ...],
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
-        """Return flatbuffer write instructions for the FullyConnected layer.
+        """Return flatbuffer write instructions for the Conv2D layer.
 
         Writes back:
             - INT8 weights to the weight buffer
@@ -251,20 +282,38 @@ class QuantizedDense(keras.Layer):
         return buffer_writes, quant_writes
 
 
-@registry.register_op("FULLY_CONNECTED")
-def build_fully_connected(
+def _map_padding(padding_code: int) -> str:
+    """Map TFLite padding integer code to Keras padding string.
+
+    Args:
+        padding_code: Integer padding code (0=SAME, 1=VALID).
+
+    Returns:
+        Keras padding string.
+
+    Raises:
+        ValueError: If the padding code is not recognized.
+    """
+    if padding_code not in _PADDING_MAP:
+        msg = f"Unsupported padding code: {padding_code}"
+        raise ValueError(msg)
+    return _PADDING_MAP[padding_code]
+
+
+@registry.register_op("CONV_2D")
+def build_conv2d(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
     _graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
-    """Build a QuantizedDense layer from parsed TFLite operator info.
+    """Build a QuantizedConv2D layer from parsed TFLite operator info.
 
-    TFLite FullyConnected inputs:
-        [0] input tensor (INT8)
-        [1] weight tensor (INT8)
+    TFLite Conv2D inputs:
+        [0] input tensor (INT8), shape (batch, H, W, C_in)
+        [1] weight tensor (INT8), shape (out_ch, kH, kW, C_in)
         [2] bias tensor (INT32, optional)
 
-    TFLite FullyConnected outputs:
+    TFLite Conv2D outputs:
         [0] output tensor (INT8)
 
     Args:
@@ -273,7 +322,7 @@ def build_fully_connected(
         graph_def: The parsed GraphDef.
 
     Returns:
-        A configured QuantizedDense Keras layer.
+        A configured QuantizedConv2D Keras layer.
     """
     input_tensor = tensors[op.input_indices[0]]
     weight_tensor = tensors[op.input_indices[1]]
@@ -290,24 +339,31 @@ def build_fully_connected(
     output_quant = output_tensor.quantization
 
     if input_quant is None or weight_quant is None or output_quant is None:
-        msg = "FullyConnected requires quantized input, weight, and output tensors"
+        msg = "Conv2D requires quantized input, weight, and output tensors"
         raise ValueError(msg)
 
-    output_units = weight_tensor.shape[0]
+    output_channels = weight_tensor.shape[0]
     bias_float = utils.get_bias_float32(
         op=op,
         tensors=tensors,
         input_scale=float(input_quant.scales[0]),
         weight_scales=weight_quant.scales,
-        output_units=output_units,
+        output_units=output_channels,
     )
 
+    # Extract conv options
     fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
+    padding_code = op.options.get("Padding", _PADDING_SAME)
+    padding = _map_padding(padding_code)
+    stride_h = op.options.get("StrideH", 1)
+    stride_w = op.options.get("StrideW", 1)
+    dilation_h = op.options.get("DilationHFactor", 1)
+    dilation_w = op.options.get("DilationWFactor", 1)
 
     weight_scale_val = utils.get_quant_param_value(weight_quant.scales)
     weight_zp_val = utils.get_quant_param_value(weight_quant.zero_points)
 
-    return QuantizedDense(
+    return QuantizedConv2D(
         weight_int8=weight_tensor.data,
         bias_float=bias_float,
         input_scale=float(input_quant.scales[0]),
@@ -316,6 +372,9 @@ def build_fully_connected(
         weight_zero_point=weight_zp_val,
         output_scale=float(output_quant.scales[0]),
         output_zero_point=float(output_quant.zero_points[0]),
+        strides=(stride_h, stride_w),
+        padding=padding,
+        dilation_rate=(dilation_h, dilation_w),
         fused_activation=fused_activation,
-        name=f"quantized_dense_{op.output_indices[0]}",
+        name=f"quantized_conv2d_{op.output_indices[0]}",
     )

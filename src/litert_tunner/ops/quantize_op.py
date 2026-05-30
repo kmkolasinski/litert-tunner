@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
-import keras
+from typing import TYPE_CHECKING
 
-from litert_tunner.graph import types
 from litert_tunner.ops import registry
 from litert_tunner.quantization import fake_quant
+
+if TYPE_CHECKING:
+    import keras
+
+    from litert_tunner.graph import types
 
 
 @registry.register_op("QUANTIZE")
 def build_quantize(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
-    graph_def: types.GraphDef | None = None,
+    _graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
     """Build a Quantize layer from parsed TFLite operator info.
 
@@ -44,7 +48,7 @@ def build_quantize(
 def build_dequantize(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
-    graph_def: types.GraphDef | None = None,
+    _graph_def: types.GraphDef | None = None,
 ) -> keras.Layer:
     """Build a Dequantize layer from parsed TFLite operator info.
 

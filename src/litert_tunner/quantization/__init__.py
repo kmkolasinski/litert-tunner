@@ -20,9 +20,9 @@ __all__ = [
     "Dequantize",
     "FakeQuantize",
     "Quantize",
-    "dequantize_float",
-    "quantize_int8",
     "compute_requantize_multiplier",
-    "quantize_ste",
+    "dequantize_float",
     "dequantize_ste",
+    "quantize_int8",
+    "quantize_ste",
 ]

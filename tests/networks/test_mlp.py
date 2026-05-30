@@ -1,4 +1,4 @@
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 
@@ -14,7 +14,8 @@ def test__mlp_single_layer_forward(make_mlp_tflite: Callable, run_interpreter: C
         float_io=True,
     )
 
-    x_train = np.random.uniform(-1.0, 1.0, (32, 4)).astype(np.float32)
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (32, 4)).astype(np.float32)
     litert_outputs = run_interpreter(model_path, x_train)
 
     # compare original LiteRT model with keras parsed
@@ -37,7 +38,8 @@ def test__mlp_multiple_layers_forward(make_mlp_tflite: Callable, run_interpreter
         float_io=True,
     )
 
-    x_train = np.random.uniform(-1.0, 1.0, (22, 32)).astype(np.float32)
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (22, 32)).astype(np.float32)
     litert_outputs = run_interpreter(model_path, x_train)
 
     # compare original LiteRT model with keras parsed
@@ -55,7 +57,6 @@ def test__mlp_multiple_layers_batchnorm_forward(
     make_mlp_tflite: Callable, run_interpreter: Callable
 ):
     """Test forward pass of MLP with Batch Normalization folding."""
-
     model_path = make_mlp_tflite(
         input_size=32,
         hidden_sizes=[32, 16, 8],
@@ -65,7 +66,8 @@ def test__mlp_multiple_layers_batchnorm_forward(
         add_batchnorm=True,
     )
 
-    x_train = np.random.uniform(-1.0, 1.0, (22, 32)).astype(np.float32)
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (22, 32)).astype(np.float32)
     litert_outputs = run_interpreter(model_path, x_train)
 
     # compare original LiteRT model with keras parsed
@@ -91,7 +93,8 @@ def test__mlp_multiple_layers_with_skip_connections_forward(
         add_skip_connections=True,
     )
 
-    x_train = np.random.uniform(-1.0, 1.0, (22, 32)).astype(np.float32)
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (22, 32)).astype(np.float32)
     litert_outputs = run_interpreter(model_path, x_train)
 
     # compare original LiteRT model with keras parsed

@@ -1,7 +1,7 @@
 """Fine-tuning end-to-end smoke test."""
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import keras
 import numpy as np
@@ -36,8 +36,8 @@ def test__finetuning_smoke_test(
             v.trainable = False
 
     # Generate some training inputs and target outputs
-    np.random.seed(42)
-    x_train = np.random.uniform(-1.0, 1.0, (32, 8)).astype(np.float32)
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (32, 8)).astype(np.float32)
     initial_outputs = tunner_model.predict(x_train)
     y_targets = initial_outputs + 0.5
 
@@ -46,14 +46,14 @@ def test__finetuning_smoke_test(
     tunner_model.compile(optimizer=keras.optimizers.SGD(learning_rate=0.2), loss="mse")
 
     # Check initial loss
-    initial_loss = float(tunner_model.evaluate(x_train, y_targets, verbose=0))  # type: ignore
+    initial_loss = float(tunner_model.evaluate(x_train, y_targets, verbose=0))  # type: ignore[reportGeneralTypeIssues]
     assert initial_loss > 0.2, f"Initial loss should be worse (higher), but got: {initial_loss}"
 
     # Train for 15 epochs to ensure convergence/loss reduction
-    tunner_model.fit(x_train, y_targets, epochs=15, batch_size=8, verbose=0)  # type: ignore
+    tunner_model.fit(x_train, y_targets, epochs=15, batch_size=8, verbose=0)  # type: ignore[reportGeneralTypeIssues]
 
     # Check that loss has decreased after training
-    final_loss = float(tunner_model.evaluate(x_train, y_targets, verbose=0))  # type: ignore
+    final_loss = float(tunner_model.evaluate(x_train, y_targets, verbose=0))  # type: ignore[reportGeneralTypeIssues]
     assert final_loss < 0.05, f"Final loss should be improved, but got: {final_loss}"
     assert final_loss < initial_loss, (
         f"Final loss ({final_loss}) is not better than initial loss ({initial_loss})"

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Callable, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import keras
 import numpy as np
 import pytest
 import tensorflow as tf
 from ai_edge_litert.interpreter import Interpreter
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -30,7 +33,6 @@ def make_dense_tflite(temp_model_dir: Path) -> Callable:
         float_io: bool = False,
         seed: int = 42,
     ) -> Path:
-        np.random.seed(seed)
         tf.random.set_seed(seed)
 
         # Build Keras model
@@ -39,8 +41,8 @@ def make_dense_tflite(temp_model_dir: Path) -> Callable:
             units=num_units,
             use_bias=use_bias,
             activation=activation,
-            kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
-            bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+            kernel_initializer=cast("Any", keras.initializers.RandomUniform(-0.5, 0.5)),
+            bias_initializer=cast("Any", keras.initializers.RandomUniform(-0.1, 0.1)),
         )(inputs)
         model = keras.Model(inputs=inputs, outputs=outputs)
 
@@ -59,7 +61,7 @@ def make_mlp_tflite(temp_model_dir: Path) -> Callable:
 
     def _make(
         input_size: int = 8,
-        hidden_sizes: list[int] = [1],
+        hidden_sizes: list[int] | None = None,
         use_bias: bool = True,
         activation: str | None = None,
         float_io: bool = False,
@@ -67,7 +69,8 @@ def make_mlp_tflite(temp_model_dir: Path) -> Callable:
         add_batchnorm: bool = False,
         seed: int = 42,
     ) -> Path:
-        np.random.seed(seed)
+        if hidden_sizes is None:
+            hidden_sizes = [1]
         tf.random.set_seed(seed)
 
         # Build Keras model
@@ -80,15 +83,14 @@ def make_mlp_tflite(temp_model_dir: Path) -> Callable:
                 units=num_units,
                 use_bias=use_bias,
                 activation=None,
-                kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
-                bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+                kernel_initializer=cast("Any", keras.initializers.RandomUniform(-0.5, 0.5)),
+                bias_initializer=cast("Any", keras.initializers.RandomUniform(-0.1, 0.1)),
             )(x)
             if add_batchnorm:
                 x = keras.layers.BatchNormalization()(x)
             # skip the last layer activation
-            if layer_index != num_layers - 1:
-                if activation is not None:
-                    x = keras.layers.Activation(activation)(x)
+            if layer_index != num_layers - 1 and activation is not None:
+                x = keras.layers.Activation(activation)(x)
             if add_skip_connections and residual.shape[-1] == num_units:
                 x = keras.layers.Add()([residual, x])
 
@@ -115,7 +117,7 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
 
     def _make(
         input_shape: tuple[int, int, int] = (8, 8, 3),
-        filters: list[int] = [8, 8],
+        filters: list[int] | None = None,
         kernel_size: int | tuple[int, int] = 3,
         use_bias: bool = True,
         activation: str | None = None,
@@ -125,7 +127,8 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
         pooling_type: str | None = None,
         seed: int = 42,
     ) -> Path:
-        np.random.seed(seed)
+        if filters is None:
+            filters = [8, 8]
         tf.random.set_seed(seed)
 
         # Build Keras model
@@ -138,8 +141,8 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
             kernel_size=kernel_size,
             padding="same",
             use_bias=use_bias,
-            kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
-            bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+            kernel_initializer=cast("Any", keras.initializers.RandomUniform(-0.5, 0.5)),
+            bias_initializer=cast("Any", keras.initializers.RandomUniform(-0.1, 0.1)),
         )(x)
         if add_batchnorm:
             x = keras.layers.BatchNormalization()(x)
@@ -161,8 +164,8 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
                 kernel_size=kernel_size,
                 padding="same",
                 use_bias=use_bias,
-                kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
-                bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+                kernel_initializer=cast("Any", keras.initializers.RandomUniform(-0.5, 0.5)),
+                bias_initializer=cast("Any", keras.initializers.RandomUniform(-0.1, 0.1)),
             )(x)
             if add_batchnorm:
                 x = keras.layers.BatchNormalization()(x)
@@ -174,8 +177,8 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
                 kernel_size=kernel_size,
                 padding="same",
                 use_bias=use_bias,
-                kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
-                bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+                kernel_initializer=cast("Any", keras.initializers.RandomUniform(-0.5, 0.5)),
+                bias_initializer=cast("Any", keras.initializers.RandomUniform(-0.1, 0.1)),
             )(x)
             if add_batchnorm:
                 x = keras.layers.BatchNormalization()(x)
@@ -188,8 +191,8 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
                         kernel_size=1,
                         padding="same",
                         use_bias=use_bias,
-                        kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
-                        bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+                        kernel_initializer=cast("Any", keras.initializers.RandomUniform(-0.5, 0.5)),
+                        bias_initializer=cast("Any", keras.initializers.RandomUniform(-0.1, 0.1)),
                     )(residual)
                     if add_batchnorm:
                         residual = keras.layers.BatchNormalization()(residual)
@@ -203,8 +206,8 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
         outputs = keras.layers.Dense(
             units=10,
             use_bias=use_bias,
-            kernel_initializer=cast(Any, keras.initializers.RandomUniform(-0.5, 0.5)),
-            bias_initializer=cast(Any, keras.initializers.RandomUniform(-0.1, 0.1)),
+            kernel_initializer=cast("Any", keras.initializers.RandomUniform(-0.5, 0.5)),
+            bias_initializer=cast("Any", keras.initializers.RandomUniform(-0.1, 0.1)),
         )(x)
 
         model = keras.Model(inputs=inputs, outputs=outputs)
@@ -230,9 +233,10 @@ def export_quantized_tflite_model(
     def representative_dataset_gen():
         # Get shape from model input shape, replacing None or dynamic dimensions with 1
         rep_shape = [1 if d is None else d for d in model.input_shape]
+        rng = np.random.default_rng(42)
         for _ in range(100):
             # Generates values within [-1.0, 1.0]
-            yield [np.random.uniform(-1.0, 1.0, rep_shape).astype(np.float32)]
+            yield [rng.uniform(-1.0, 1.0, rep_shape).astype(np.float32)]
 
     # Convert to TFLite fully quantized INT8
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
@@ -247,7 +251,7 @@ def export_quantized_tflite_model(
     tflite_model = converter.convert()
 
     # Save to temp path
-    with open(output_path, "wb") as f:
+    with output_path.open("wb") as f:
         f.write(tflite_model)
 
 
@@ -278,7 +282,6 @@ def run_interpreter() -> Callable:
 
         interpreter.invoke()
 
-        output_data = interpreter.get_tensor(output_details[0]["index"])
-        return output_data
+        return interpreter.get_tensor(output_details[0]["index"])
 
     return _run

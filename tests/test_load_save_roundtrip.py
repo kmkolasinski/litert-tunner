@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 import numpy as np
 from ai_edge_litert.interpreter import Interpreter
@@ -33,7 +36,8 @@ def test__load_save_identity(
     litert_tunner.save_model(tunner_model, str(saved_path))
 
     # 3. Verify outputs of original and saved models are bit-exact identical
-    inputs = np.random.uniform(-1.0, 1.0, (5, 8)).astype(np.float32)
+    rng = np.random.default_rng(42)
+    inputs = rng.uniform(-1.0, 1.0, (5, 8)).astype(np.float32)
 
     original_out = run_interpreter(model_path, inputs)
     saved_out = run_interpreter(saved_path, inputs)

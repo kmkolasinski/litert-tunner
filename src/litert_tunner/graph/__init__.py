@@ -24,11 +24,6 @@ from litert_tunner.graph.types import (
 )
 
 __all__ = [
-    "build_keras_model",
-    "GraphDef",
-    "OperatorInfo",
-    "QuantizationParams",
-    "TensorInfo",
     "DTYPE_BOOL",
     "DTYPE_FLOAT16",
     "DTYPE_FLOAT32",
@@ -41,4 +36,9 @@ __all__ = [
     "DTYPE_UINT16",
     "DTYPE_UINT32",
     "DTYPE_UINT64",
+    "GraphDef",
+    "OperatorInfo",
+    "QuantizationParams",
+    "TensorInfo",
+    "build_keras_model",
 ]

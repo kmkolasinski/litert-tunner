@@ -1,7 +1,7 @@
 """Tests for flatbuffer parser module."""
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import pytest
@@ -43,7 +43,7 @@ class TestParseTfliteBasic:
     def test__preserves_raw_model_bytes(self, make_dense_tflite: Callable):
         """raw_model_bytes must match the original file contents."""
         model_path = make_dense_tflite(num_features=4, num_units=1)
-        with open(model_path, "rb") as f:
+        with model_path.open("rb") as f:
             expected_bytes = f.read()
         graph_def = flatbuffer.parse_tflite(model_path)
         assert graph_def.raw_model_bytes == expected_bytes
@@ -262,7 +262,7 @@ class TestParseTfliteErrors:
         """Must raise an error when given garbage bytes instead of a valid flatbuffer."""
         garbage_path = tmp_path / "garbage.tflite"
         garbage_path.write_bytes(b"this is not a valid flatbuffer")
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017
             flatbuffer.parse_tflite(garbage_path)
 
 
@@ -280,7 +280,7 @@ class TestParseTfliteDeterminism:
         assert graph_def_1.input_indices == graph_def_2.input_indices
         assert graph_def_1.output_indices == graph_def_2.output_indices
 
-        for t1, t2 in zip(graph_def_1.tensors, graph_def_2.tensors):
+        for t1, t2 in zip(graph_def_1.tensors, graph_def_2.tensors, strict=False):
             assert t1.name == t2.name
             assert t1.shape == t2.shape
             assert t1.dtype == t2.dtype
@@ -290,7 +290,7 @@ class TestParseTfliteDeterminism:
             else:
                 assert t2.data is None
 
-        for op1, op2 in zip(graph_def_1.operators, graph_def_2.operators):
+        for op1, op2 in zip(graph_def_1.operators, graph_def_2.operators, strict=False):
             assert op1.op_type == op2.op_type
             assert op1.input_indices == op2.input_indices
             assert op1.output_indices == op2.output_indices
@@ -300,7 +300,7 @@ class TestTensorTypeMaps:
     """Tests for _TENSOR_TYPE_MAP, _NUMPY_DTYPE_MAP, and helper functions."""
 
     # All tensor types that must be supported (tflite code, dtype string, numpy dtype).
-    _EXPECTED_TYPES = [
+    _EXPECTED_TYPES = (
         (tflite.TensorType.FLOAT16, types.DTYPE_FLOAT16, np.float16),
         (tflite.TensorType.FLOAT32, types.DTYPE_FLOAT32, np.float32),
         (tflite.TensorType.FLOAT64, types.DTYPE_FLOAT64, np.float64),
@@ -313,10 +313,10 @@ class TestTensorTypeMaps:
         (tflite.TensorType.UINT32, types.DTYPE_UINT32, np.uint32),
         (tflite.TensorType.UINT64, types.DTYPE_UINT64, np.uint64),
         (tflite.TensorType.BOOL, types.DTYPE_BOOL, np.bool_),
-    ]
+    )
 
     @pytest.mark.parametrize(
-        "tflite_code,expected_str,_np_dtype",
+        ("tflite_code", "expected_str", "_np_dtype"),
         _EXPECTED_TYPES,
         ids=[t[1] for t in _EXPECTED_TYPES],
     )
@@ -326,7 +326,7 @@ class TestTensorTypeMaps:
         assert parser._TENSOR_TYPE_MAP[tflite_code] == expected_str
 
     @pytest.mark.parametrize(
-        "tflite_code,expected_str,_np_dtype",
+        ("tflite_code", "expected_str", "_np_dtype"),
         _EXPECTED_TYPES,
         ids=[t[1] for t in _EXPECTED_TYPES],
     )
@@ -335,7 +335,7 @@ class TestTensorTypeMaps:
         assert parser._map_tensor_type(tflite_code) == expected_str
 
     @pytest.mark.parametrize(
-        "tflite_code,_dtype_str,expected_np",
+        ("tflite_code", "_dtype_str", "expected_np"),
         _EXPECTED_TYPES,
         ids=[t[1] for t in _EXPECTED_TYPES],
     )
@@ -345,7 +345,7 @@ class TestTensorTypeMaps:
         assert parser._NUMPY_DTYPE_MAP[tflite_code] == expected_np
 
     @pytest.mark.parametrize(
-        "tflite_code,_dtype_str,expected_np",
+        ("tflite_code", "_dtype_str", "expected_np"),
         _EXPECTED_TYPES,
         ids=[t[1] for t in _EXPECTED_TYPES],
     )
@@ -373,7 +373,7 @@ class TestBuiltinOptionsMap:
 
     # All entries that must be present in _BUILTIN_OPTIONS_MAP,
     # grouped by project phase for clarity.
-    _EXPECTED_OPTIONS = [
+    _EXPECTED_OPTIONS = (
         # Phase 1: Dense
         (tflite.BuiltinOptions.FullyConnectedOptions, tflite.FullyConnectedOptions),
         # Phase 2: Convolutions
@@ -425,10 +425,10 @@ class TestBuiltinOptionsMap:
         (tflite.BuiltinOptions.QuantizeOptions, tflite.QuantizeOptions),
         (tflite.BuiltinOptions.DequantizeOptions, tflite.DequantizeOptions),
         (tflite.BuiltinOptions.FakeQuantOptions, tflite.FakeQuantOptions),
-    ]
+    )
 
     @pytest.mark.parametrize(
-        "opt_code,opt_class",
+        ("opt_code", "opt_class"),
         _EXPECTED_OPTIONS,
         ids=[cls.__name__ for _, cls in _EXPECTED_OPTIONS],
     )

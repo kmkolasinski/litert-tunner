@@ -11,7 +11,8 @@ import typing
 import numpy as np
 from keras import ops
 
-from litert_tunner.graph import types
+if typing.TYPE_CHECKING:
+    from litert_tunner.graph import types
 
 # Fused activation function codes from TFLite schema
 FUSED_ACTIVATION_NONE = 0
@@ -19,8 +20,10 @@ FUSED_ACTIVATION_RELU = 1
 FUSED_ACTIVATION_RELU_N1_TO_1 = 2
 FUSED_ACTIVATION_RELU6 = 3
 
+TensorLike = typing.Any
 
-def expand_dims_if_not_scalar(tensor: typing.Any, axis: int) -> typing.Any:
+
+def expand_dims_if_not_scalar(tensor: TensorLike, axis: int) -> TensorLike:
     """Expands the dimensions of a tensor if it is not a scalar (ndim > 0).
 
     Args:
@@ -35,7 +38,7 @@ def expand_dims_if_not_scalar(tensor: typing.Any, axis: int) -> typing.Any:
     return tensor
 
 
-def quantize_to_int8(tensor: typing.Any) -> np.ndarray:
+def quantize_to_int8(tensor: TensorLike) -> np.ndarray:
     """Converts a tensor to a rounded numpy INT8 array.
 
     Args:
@@ -44,14 +47,14 @@ def quantize_to_int8(tensor: typing.Any) -> np.ndarray:
     Returns:
         NumPy array with dtype int8.
     """
-    val = typing.cast(np.ndarray, ops.convert_to_numpy(tensor))
+    val = typing.cast("np.ndarray", ops.convert_to_numpy(tensor))
     return np.round(val).astype(np.int8)
 
 
 def quantize_bias_to_int32(
-    bias_tensor: typing.Any,
-    input_scale_tensor: typing.Any,
-    weight_scale_tensor: typing.Any,
+    bias_tensor: TensorLike,
+    input_scale_tensor: TensorLike,
+    weight_scale_tensor: TensorLike,
 ) -> np.ndarray:
     """Quantizes a float32 bias tensor to INT32 using input and weight scales.
 
@@ -65,10 +68,10 @@ def quantize_bias_to_int32(
     Returns:
         NumPy array with dtype int32.
     """
-    bias_val = typing.cast(np.ndarray, ops.convert_to_numpy(bias_tensor))
-    input_scale_val = float(typing.cast(typing.Any, ops.convert_to_numpy(input_scale_tensor)))
+    bias_val = typing.cast("np.ndarray", ops.convert_to_numpy(bias_tensor))
+    input_scale_val = float(typing.cast("typing.Any", ops.convert_to_numpy(input_scale_tensor)))
     weight_scale_val = np.asarray(
-        typing.cast(np.ndarray, ops.convert_to_numpy(weight_scale_tensor))
+        typing.cast("np.ndarray", ops.convert_to_numpy(weight_scale_tensor))
     )
     bias_scale = input_scale_val * weight_scale_val
     return np.round(bias_val / bias_scale).astype(np.int32)
@@ -107,8 +110,9 @@ def get_bias_float32(
     Returns:
         NumPy array with dtype float32.
     """
-    if len(op.input_indices) > 2 and op.input_indices[2] >= 0:
-        bias_tensor = tensors[op.input_indices[2]]
+    bias_index = 2
+    if len(op.input_indices) > bias_index and op.input_indices[bias_index] >= 0:
+        bias_tensor = tensors[op.input_indices[bias_index]]
         if bias_tensor.data is not None:
             # TFLite stores bias as INT32; convert to float32
             bias_scale = input_scale * weight_scales.astype(np.float64)
@@ -116,7 +120,7 @@ def get_bias_float32(
     return np.zeros(output_units, dtype=np.float32)
 
 
-def apply_fused_activation(x: typing.Any, fused_activation: int) -> typing.Any:
+def apply_fused_activation(x: TensorLike, fused_activation: int) -> TensorLike:
     """Applies a TFLite fused activation function to a tensor.
 
     Args:
@@ -128,12 +132,11 @@ def apply_fused_activation(x: typing.Any, fused_activation: int) -> typing.Any:
     """
     if fused_activation == FUSED_ACTIVATION_NONE:
         return x
-    elif fused_activation == FUSED_ACTIVATION_RELU:
+    if fused_activation == FUSED_ACTIVATION_RELU:
         return ops.relu(x)
-    elif fused_activation == FUSED_ACTIVATION_RELU6:
+    if fused_activation == FUSED_ACTIVATION_RELU6:
         return ops.minimum(ops.relu(x), 6.0)
-    elif fused_activation == FUSED_ACTIVATION_RELU_N1_TO_1:
+    if fused_activation == FUSED_ACTIVATION_RELU_N1_TO_1:
         return ops.clip(x, -1.0, 1.0)
-    else:
-        msg = f"Unsupported fused activation: {fused_activation}"
-        raise ValueError(msg)
+    msg = f"Unsupported fused activation: {fused_activation}"
+    raise ValueError(msg)

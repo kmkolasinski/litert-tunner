@@ -66,9 +66,71 @@ patch = ["_exit"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+indent-width = 4
+exclude = [
+    "metadata_pb2.py",
+]
 
+# Apply fixes automatically
+fix = true
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+# By default, Ruff enables Flake8's F rules, along with a subset of the E rules,
+# omitting any stylistic rules that overlap with the use of a formatter, like ruff format or Black.
+# For more details see https://docs.astral.sh/ruff/rules/
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+exclude = ["*.ipynb"]
+select = ["ALL"]
+
+ignore = [
+    # Mostly Missing docstring errors - most of them are False Positives
+    "D100", "D101", "D102", "D103", "D104", "D105", "D107", "D205",
+    "ANN204", # Missing type annotation for self in method
+    "ANN201", # Missing return type annotation for public function
+    "ANN002", "ANN003", # Missing type annotation for `*args` or `**kwargs`
+    "COM812", # Conflicts with another rule
+    "TD002", "TD003", "FIX002", # Todos related formatting rules
+    "TRY003", #  Avoid specifying long messages outside the exception class
+    "EM101", # Exception must not use a string literal, assign to variable first
+    "G004", # Logging uses f-string formatting
+    "PLR0913", # Too many arguments in function - some functions are complex by nature
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "SLF001", #  Private member accessed
+    "PERF", # Performance checks are disabled for tests
+    "PLR2004", #  Magic value used in comparison
+    "ARG001", # Unused argument
+    "PT019",  # Fixture `_` without value is injected as parameter
+    "S101", # Use of assert detected
+    "ANN", # Missing type annotation in tests is allowed
+    "ISC001", # single-line-implicit-string-concatenation - conflicts with another rule
+    "PT011", # ValueError is too broad
+    "FBT", # Boolean positional arguments are allowed in tests
+    "C901", # Complexity checks are disabled for test code
+    "PLR0912", # Branch complexity checks are disabled for test code
+    "PLR0915", # Statement complexity checks are disabled for test code
+    "S108", # Insecure temp files are allowed in test code
+]
+
+# Only allow autofix for these import-related and docstring rules
+fixable = ["F401", "F403", "I001", "D411", "D415", "D208", "D209"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.bumpversion]
 current_version = "0.1.0"

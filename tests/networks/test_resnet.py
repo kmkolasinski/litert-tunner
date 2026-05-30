@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
-from ai_edge_litert.interpreter import Interpreter
+
+import litert_tunner
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test__make_resnet_tflite_creates_valid_model(
@@ -21,31 +24,22 @@ def test__make_resnet_tflite_creates_valid_model(
         kernel_size=3,
         use_bias=True,
         activation="relu",
-        float_io=False,
+        float_io=True,
         add_skip_connections=True,
         add_batchnorm=True,
+        pooling_type="max",
     )
 
-    assert Path(model_path).exists()
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (32, 8, 8, 3)).astype(np.float32)
+    litert_outputs = run_interpreter(model_path, x_train)
 
-    # Load with interpreter and check details
-    interpreter = Interpreter(model_path=str(model_path))
-    interpreter.allocate_tensors()
+    # compare original LiteRT model with keras parsed
+    keras_model = litert_tunner.load_model(str(model_path))
+    keras_outputs = keras_model.predict(x_train)
+    np.testing.assert_allclose(litert_outputs, keras_outputs, atol=1e-3)
 
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-
-    # Verify input shape (batch dimension of 1 is prepended during resizing/run)
-    assert input_details[0]["shape"].tolist() == [1, 8, 8, 3]
-    assert input_details[0]["dtype"] == np.int8
-
-    # Verify output shape and type
-    assert output_details[0]["shape"].tolist() == [1, 10]
-    assert output_details[0]["dtype"] == np.int8
-
-    # Run interpreter on random inputs to verify execution
-    inputs = np.random.uniform(-1.0, 1.0, (1, 8, 8, 3)).astype(np.float32)
-    output = run_interpreter(model_path, inputs)
-
-    assert output.shape == (1, 10)
-    assert output.dtype == np.int8
+    # save the model and make sure the outputs are still the same
+    litert_tunner.save_model(keras_model, str(model_path))
+    litert_saved_outputs = run_interpreter(model_path, x_train)
+    np.testing.assert_allclose(keras_outputs, litert_saved_outputs, atol=1e-3)

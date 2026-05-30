@@ -296,6 +296,7 @@ tests/
 - **Linting** — must pass `ruff check` and `ruff format` (configured in
   `pyproject.toml`).
 - **No magic numbers** — use named constants or enums.
+- **Random number generation** — always use the modern `np.random.default_rng(seed)` API to create a `Generator` instance for random arrays (e.g. `rng.uniform(...)`), and avoid legacy APIs like `np.random.seed` and `np.random.uniform` to prevent `NPY002` violations.
 
 ### 6.2 Import Style (Google-style)
 
@@ -497,5 +498,6 @@ checklist:
 - **Do not use Keras 3 built-in quantization API.** It uses symmetric
   quantization, is one-way PTQ (not trainable), and doesn't parse TFLite
   flatbuffers. Our library has fundamentally different goals.
+- **Do not use legacy `np.random.seed` or `np.random.uniform`.** Always use modern `np.random.default_rng(seed)` to obtain a generator instance (`Generator`) and call its methods.
 - **Do not import symbols directly from submodules.** Use Google-style imports
   (import the module, use dotted access).

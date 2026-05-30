@@ -31,10 +31,10 @@ def save_model(model: keras.Model, path: str) -> None:
 
 
 __all__ = [
-    "load_model",
-    "save_model",
     "flatbuffer",
     "graph",
+    "load_model",
     "ops",
     "quantization",
+    "save_model",
 ]

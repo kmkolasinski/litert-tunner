@@ -1,7 +1,7 @@
 """Fake quantization Keras layers for litert_tunner.
 
 These layers simulate TFLite's integer arithmetic in float32,
-enabling gradient flow through quantization boundaries via
+closing gradient flow through quantization boundaries via
 Straight-Through Estimator (STE).
 
 All layers use keras.ops for backend-agnostic computation.
@@ -18,6 +18,10 @@ from litert_tunner.graph import types
 # INT8 quantization range constants
 _INT8_MIN = -128.0
 _INT8_MAX = 127.0
+
+TensorLike = typing.Any
+TensorOrScalar = typing.Any
+ShapeLike = tuple[int | None, ...] | list[int | None] | list[tuple[int | None, ...]]
 
 
 class FakeQuantize(keras.Layer):
@@ -41,6 +45,7 @@ class FakeQuantize(keras.Layer):
         self,
         scale: float,
         zero_point: float,
+        *,
         trainable: bool = True,
         **kwargs,
     ):
@@ -49,7 +54,7 @@ class FakeQuantize(keras.Layer):
         self._initial_zero_point = zero_point
         self._trainable_params = trainable
 
-    def build(self, input_shape):
+    def build(self, input_shape: ShapeLike) -> None:
         """Create scale and zero_point weights for the layer."""
         self.scale = self.add_weight(
             name="scale",
@@ -65,11 +70,11 @@ class FakeQuantize(keras.Layer):
         )
         super().build(input_shape)
 
-    def call(self, x):
+    def call(self, x: TensorLike) -> TensorLike:
         """Forward pass with STE gradient."""
         return _fake_quantize(x, self.scale, self.zero_point)
 
-    def get_config(self):
+    def get_config(self) -> dict[str, typing.Any]:
         """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
         config.update(
@@ -101,6 +106,7 @@ class Dequantize(keras.Layer):
         self,
         scale: float,
         zero_point: float,
+        *,
         passthrough: bool = False,
         **kwargs,
     ):
@@ -109,7 +115,7 @@ class Dequantize(keras.Layer):
         self._initial_zero_point = zero_point
         self._passthrough = passthrough
 
-    def build(self, input_shape):
+    def build(self, input_shape: ShapeLike) -> None:
         """Create scale and zero_point weights for the layer."""
         self.scale = self.add_weight(
             name="scale",
@@ -125,13 +131,13 @@ class Dequantize(keras.Layer):
         )
         super().build(input_shape)
 
-    def call(self, x):
+    def call(self, x: TensorLike) -> TensorLike:
         """Dequantize input tensor."""
         if self._passthrough:
             return x
         return dequantize_ste(x, self.scale, self.zero_point)
 
-    def get_config(self):
+    def get_config(self) -> dict[str, typing.Any]:
         """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
         config.update(
@@ -146,7 +152,7 @@ class Dequantize(keras.Layer):
     def collect_write_ops(
         self,
         op: types.OperatorInfo,
-        tensors: tuple[types.TensorInfo, ...],
+        _tensors: tuple[types.TensorInfo, ...],
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
         """Return flatbuffer write instructions for the Dequantize layer.
 
@@ -154,7 +160,7 @@ class Dequantize(keras.Layer):
 
         Args:
             op: The OperatorInfo that this layer was built from.
-            tensors: All tensors in the graph.
+            _tensors: All tensors in the graph.
 
         Returns:
             A tuple of (buffer_writes, quantization_writes).
@@ -185,6 +191,7 @@ class Quantize(keras.Layer):
         self,
         scale: float,
         zero_point: float,
+        *,
         trainable: bool = True,
         **kwargs,
     ):
@@ -193,7 +200,7 @@ class Quantize(keras.Layer):
         self._initial_zero_point = zero_point
         self._trainable_params = trainable
 
-    def build(self, input_shape):
+    def build(self, input_shape: ShapeLike) -> None:
         """Create scale and zero_point weights for the layer."""
         self.scale = self.add_weight(
             name="scale",
@@ -209,11 +216,11 @@ class Quantize(keras.Layer):
         )
         super().build(input_shape)
 
-    def call(self, x):
+    def call(self, x: TensorLike) -> TensorLike:
         """Quantize input to simulated INT8."""
         return quantize_ste(x, self.scale, self.zero_point)
 
-    def get_config(self):
+    def get_config(self) -> dict[str, typing.Any]:
         """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
         config.update(
@@ -228,7 +235,7 @@ class Quantize(keras.Layer):
     def collect_write_ops(
         self,
         op: types.OperatorInfo,
-        tensors: tuple[types.TensorInfo, ...],
+        _tensors: tuple[types.TensorInfo, ...],
     ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
         """Return flatbuffer write instructions for the Quantize layer.
 
@@ -236,7 +243,7 @@ class Quantize(keras.Layer):
 
         Args:
             op: The OperatorInfo that this layer was built from.
-            tensors: All tensors in the graph.
+            _tensors: All tensors in the graph.
 
         Returns:
             A tuple of (buffer_writes, quantization_writes).
@@ -246,7 +253,7 @@ class Quantize(keras.Layer):
         return [], [quant_write]
 
 
-def _round_ste(x):
+def _round_ste(x: TensorLike) -> TensorLike:
     """Round with Straight-Through Estimator.
 
     Forward: round(x)
@@ -255,7 +262,7 @@ def _round_ste(x):
     return x + ops.stop_gradient(ops.round(x) - x)
 
 
-def _clip_ste(x, min_val, max_val):
+def _clip_ste(x: TensorLike, min_val: float, max_val: float) -> TensorLike:
     """Clip with Straight-Through Estimator.
 
     Forward: clip(x, min_val, max_val)
@@ -264,16 +271,15 @@ def _clip_ste(x, min_val, max_val):
     return x + ops.stop_gradient(ops.clip(x, min_val, max_val) - x)
 
 
-def quantize_ste(x, scale, zero_point):
+def quantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
     """Quantize float32 → simulated INT8 with STE gradients."""
     scaled = x / scale
     rounded = _round_ste(scaled)
     shifted = rounded + zero_point
-    clamped = _clip_ste(shifted, _INT8_MIN, _INT8_MAX)
-    return clamped
+    return _clip_ste(shifted, _INT8_MIN, _INT8_MAX)
 
 
-def dequantize_ste(x, scale, zero_point):
+def dequantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
     """Dequantize simulated INT8 values to float32.
 
     Formula: real_value = scale * (x - zero_point)
@@ -282,14 +288,13 @@ def dequantize_ste(x, scale, zero_point):
     return scale * (x_float - zero_point)
 
 
-def _fake_quantize(x, scale, zero_point):
+def _fake_quantize(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
     """Fake quantize: quantize then dequantize with STE gradients."""
     quantized = quantize_ste(x, scale, zero_point)
-    dequantized = dequantize_ste(quantized, scale, zero_point)
-    return dequantized
+    return dequantize_ste(quantized, scale, zero_point)
 
 
-def to_float_list(tensor: typing.Any) -> list[float]:
+def to_float_list(tensor: TensorOrScalar) -> list[float]:
     """Converts a tensor to a list of float values.
 
     Args:
@@ -298,13 +303,13 @@ def to_float_list(tensor: typing.Any) -> list[float]:
     Returns:
         A list of python float values.
     """
-    arr = np.asarray(typing.cast(np.ndarray, ops.convert_to_numpy(tensor)))
+    arr = np.asarray(typing.cast("np.ndarray", ops.convert_to_numpy(tensor)))
     if arr.ndim == 0:
         return [float(arr)]
     return [float(x) for x in arr]
 
 
-def to_int_list(tensor: typing.Any) -> list[int]:
+def to_int_list(tensor: TensorOrScalar) -> list[int]:
     """Converts a tensor to a list of rounded integer values.
 
     Args:
@@ -313,7 +318,7 @@ def to_int_list(tensor: typing.Any) -> list[int]:
     Returns:
         A list of python int values.
     """
-    arr = np.asarray(typing.cast(np.ndarray, ops.convert_to_numpy(tensor)))
+    arr = np.asarray(typing.cast("np.ndarray", ops.convert_to_numpy(tensor)))
     if arr.ndim == 0:
         return [int(np.round(arr))]
     return [int(np.round(x)) for x in arr]
@@ -321,8 +326,8 @@ def to_int_list(tensor: typing.Any) -> list[int]:
 
 def make_quant_write_op(
     tensor_index: int,
-    scale_tensor: typing.Any,
-    zp_tensor: typing.Any,
+    scale_tensor: TensorOrScalar,
+    zp_tensor: TensorOrScalar,
 ) -> types.QuantizationWriteOp:
     """Helper to construct a QuantizationWriteOp from Keras scale/zp weights.
 

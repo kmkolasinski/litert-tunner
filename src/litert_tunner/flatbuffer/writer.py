@@ -61,7 +61,7 @@ def save_tflite(model: keras.Model, path: str | Path) -> None:
     if not hasattr(model, "_graph_def"):
         raise ValueError("Model was not created by litert_tunner.load_model")
 
-    graph_def: types.GraphDef = model._graph_def
+    graph_def: types.GraphDef = model._graph_def  # noqa: SLF001
 
     buf = bytearray(graph_def.raw_model_bytes)
     model_obj = tflite.Model.GetRootAs(buf, 0)
@@ -91,14 +91,15 @@ def save_tflite(model: keras.Model, path: str | Path) -> None:
     for write_op in buffer_writes:
         tensor_t = subgraph_t.Tensors(write_op.tensor_index)
         if tensor_t is None:
-            raise ValueError(f"Tensor at index {write_op.tensor_index} is None")
+            msg = f"Tensor at index {write_op.tensor_index} is None"
+            raise ValueError(msg)
         _overwrite_buffer(buf, model_obj, tensor_t.Buffer(), write_op.data)
 
     # Apply all quantization writes
     for write_op in quant_writes:
         _overwrite_quantization(buf, subgraph_t, write_op)
 
-    with open(path, "wb") as f:
+    with Path(path).open("wb") as f:
         f.write(bytes(buf))
 
 
@@ -122,9 +123,9 @@ def _find_layer_for_op(
     output_idx = op.output_indices[0]
     # Try common naming patterns used by registered op builders.
     # Each builder names its layer as ``{prefix}_{output_index}``.
-    for layer_name in layer_map:
+    for layer_name, layer in layer_map.items():
         if layer_name.endswith(f"_{output_idx}"):
-            return layer_map[layer_name]
+            return layer
     return None
 
 
@@ -147,15 +148,15 @@ def _overwrite_buffer(
     """
     buffer_t = model_obj.Buffers(buffer_idx)
     if buffer_t is None:
-        raise ValueError(f"Buffer at index {buffer_idx} is None")
-    o = flatbuffers.number_types.UOffsetTFlags.py_type(buffer_t._tab.Offset(4))
+        msg = f"Buffer at index {buffer_idx} is None"
+        raise ValueError(msg)
+    o = flatbuffers.number_types.UOffsetTFlags.py_type(buffer_t._tab.Offset(4))  # noqa: SLF001
     if o != 0:
-        offset = buffer_t._tab.Vector(o)
+        offset = buffer_t._tab.Vector(o)  # noqa: SLF001
         length = buffer_t.DataLength()
         if len(new_data) != length:
-            raise ValueError(
-                f"Size mismatch in buffer {buffer_idx}: expected {length}, got {len(new_data)}"
-            )
+            msg = f"Size mismatch in buffer {buffer_idx}: expected {length}, got {len(new_data)}"
+            raise ValueError(msg)
         buf[offset : offset + length] = new_data
 
 
@@ -176,25 +177,28 @@ def _overwrite_quantization(
     """
     tensor_t = subgraph_t.Tensors(write_op.tensor_index)
     if tensor_t is None:
-        raise ValueError(f"Tensor at index {write_op.tensor_index} is None")
+        msg = f"Tensor at index {write_op.tensor_index} is None"
+        raise ValueError(msg)
     quant_t = tensor_t.Quantization()
     if quant_t is None:
         return
 
-    o_scale = flatbuffers.number_types.UOffsetTFlags.py_type(quant_t._tab.Offset(4))
+    o_scale = flatbuffers.number_types.UOffsetTFlags.py_type(quant_t._tab.Offset(4))  # noqa: SLF001
     if o_scale != 0:
-        offset = quant_t._tab.Vector(o_scale)
+        offset = quant_t._tab.Vector(o_scale)  # noqa: SLF001
         length = quant_t.ScaleLength()
         if len(write_op.scales) != length:
-            raise ValueError(f"Scale length mismatch in tensor {write_op.tensor_index}")
+            msg = f"Scale length mismatch in tensor {write_op.tensor_index}"
+            raise ValueError(msg)
         new_data = np.array(write_op.scales, dtype=np.float32).tobytes()
         buf[offset : offset + len(new_data)] = new_data
 
-    o_zp = flatbuffers.number_types.UOffsetTFlags.py_type(quant_t._tab.Offset(6))
+    o_zp = flatbuffers.number_types.UOffsetTFlags.py_type(quant_t._tab.Offset(6))  # noqa: SLF001
     if o_zp != 0:
-        offset = quant_t._tab.Vector(o_zp)
+        offset = quant_t._tab.Vector(o_zp)  # noqa: SLF001
         length = quant_t.ZeroPointLength()
         if len(write_op.zero_points) != length:
-            raise ValueError(f"Zero point length mismatch in tensor {write_op.tensor_index}")
+            msg = f"Zero point length mismatch in tensor {write_op.tensor_index}"
+            raise ValueError(msg)
         new_data = np.array(write_op.zero_points, dtype=np.int64).tobytes()
         buf[offset : offset + len(new_data)] = new_data

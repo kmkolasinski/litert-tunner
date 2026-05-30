@@ -1,6 +1,6 @@
 """Tests for fully connected (Dense) operator."""
 
-from typing import Callable
+from collections.abc import Callable
 
 import keras
 import numpy as np
@@ -22,8 +22,8 @@ def test__dense_no_activation(make_dense_tflite: Callable, run_interpreter: Call
     tunner_model = litert_tunner.load_model(str(model_path))
 
     # Generate random test inputs
-    np.random.seed(123)
-    inputs = np.random.uniform(-1.0, 1.0, (1, 8)).astype(np.float32)
+    rng = np.random.default_rng(123)
+    inputs = rng.uniform(-1.0, 1.0, (1, 8)).astype(np.float32)
 
     # 1. Run Interpreter
     interpreter_output = run_interpreter(model_path, inputs)
@@ -55,7 +55,8 @@ def test__dense_multiple_units(make_dense_tflite: Callable, run_interpreter: Cal
     )
     tunner_model = litert_tunner.load_model(str(model_path))
 
-    inputs = np.random.uniform(-1.0, 1.0, (1, 8)).astype(np.float32)
+    rng = np.random.default_rng(42)
+    inputs = rng.uniform(-1.0, 1.0, (1, 8)).astype(np.float32)
     interpreter_output = run_interpreter(model_path, inputs)
 
     graph_def = tunner_model._graph_def
@@ -82,7 +83,8 @@ def test__dense_float32_io(make_dense_tflite: Callable, run_interpreter: Callabl
     )
     tunner_model = litert_tunner.load_model(str(model_path))
 
-    inputs = np.random.uniform(-1.0, 1.0, (1, 8)).astype(np.float32)
+    rng = np.random.default_rng(42)
+    inputs = rng.uniform(-1.0, 1.0, (1, 8)).astype(np.float32)
     interpreter_output = run_interpreter(model_path, inputs)
 
     # For float32 I/O, QUANTIZE/DEQUANTIZE handle the scale/zp internally
@@ -184,8 +186,9 @@ class TestDenseCall:
     def test__output_shape_matches_expected(self, dense_setup):
         """Output shape must match expected matmul shape."""
         op, tensors = dense_setup
-        input_data = np.random.uniform(-1.0, 1.0, (2, 4)).astype(np.float32)
-        layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (2, 4)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
         op_test_utils.assert_output_shape(output, (2, 2))
 
     def test__dense_formula_matches_expected(self, dense_setup):

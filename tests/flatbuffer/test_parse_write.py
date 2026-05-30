@@ -39,17 +39,19 @@ def create_cnn_skip_model():
 def create_efficientnet_model():
     return keras.applications.EfficientNetB0(
         include_top=True,
-        weights=None,  # type: ignore
+        weights=None,  # type: ignore[arg-type]
         input_shape=(32, 32, 3),
         classes=10,
     )
 
 
 def convert_to_tflite_int8(model, path):
+    rng = np.random.default_rng(42)
+
     def representative_dataset():
         input_shape = [1 if d is None else d for d in model.input_shape]
         for _ in range(10):
-            yield [np.random.uniform(-1.0, 1.0, input_shape).astype(np.float32)]
+            yield [rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)]
 
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -59,7 +61,7 @@ def convert_to_tflite_int8(model, path):
     converter.inference_output_type = tf.int8
     tflite_model = converter.convert()
 
-    with open(path, "wb") as f:
+    with path.open("wb") as f:
         f.write(tflite_model)
 
 
