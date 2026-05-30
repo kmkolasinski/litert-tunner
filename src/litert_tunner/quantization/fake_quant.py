@@ -129,8 +129,7 @@ class Dequantize(keras.Layer):
         """Dequantize input tensor."""
         if self._passthrough:
             return x
-        x_float = ops.cast(x, "float32")
-        return self.scale * (x_float - self.zero_point)
+        return dequantize_ste(x, self.scale, self.zero_point)
 
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
@@ -163,11 +162,7 @@ class Dequantize(keras.Layer):
         if self._passthrough:
             return [], []
         input_tensor_idx = op.input_indices[0]
-        scale_val = float(typing.cast(typing.Any, ops.convert_to_numpy(self.scale)))
-        zp_val = int(np.round(typing.cast(typing.Any, ops.convert_to_numpy(self.zero_point))))
-        quant_write = types.QuantizationWriteOp(
-            tensor_index=input_tensor_idx, scales=[scale_val], zero_points=[zp_val]
-        )
+        quant_write = make_quant_write_op(input_tensor_idx, self.scale, self.zero_point)
         return [], [quant_write]
 
 
@@ -216,7 +211,7 @@ class Quantize(keras.Layer):
 
     def call(self, x):
         """Quantize input to simulated INT8."""
-        return _quantize_ste(x, self.scale, self.zero_point)
+        return quantize_ste(x, self.scale, self.zero_point)
 
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
@@ -247,11 +242,7 @@ class Quantize(keras.Layer):
             A tuple of (buffer_writes, quantization_writes).
         """
         output_tensor_idx = op.output_indices[0]
-        scale_val = float(typing.cast(typing.Any, ops.convert_to_numpy(self.scale)))
-        zp_val = int(np.round(typing.cast(typing.Any, ops.convert_to_numpy(self.zero_point))))
-        quant_write = types.QuantizationWriteOp(
-            tensor_index=output_tensor_idx, scales=[scale_val], zero_points=[zp_val]
-        )
+        quant_write = make_quant_write_op(output_tensor_idx, self.scale, self.zero_point)
         return [], [quant_write]
 
 
@@ -273,7 +264,7 @@ def _clip_ste(x, min_val, max_val):
     return x + ops.stop_gradient(ops.clip(x, min_val, max_val) - x)
 
 
-def _quantize_ste(x, scale, zero_point):
+def quantize_ste(x, scale, zero_point):
     """Quantize float32 → simulated INT8 with STE gradients."""
     scaled = x / scale
     rounded = _round_ste(scaled)
@@ -282,8 +273,71 @@ def _quantize_ste(x, scale, zero_point):
     return clamped
 
 
+def dequantize_ste(x, scale, zero_point):
+    """Dequantize simulated INT8 values to float32.
+
+    Formula: real_value = scale * (x - zero_point)
+    """
+    x_float = ops.cast(x, "float32")
+    return scale * (x_float - zero_point)
+
+
 def _fake_quantize(x, scale, zero_point):
     """Fake quantize: quantize then dequantize with STE gradients."""
-    quantized = _quantize_ste(x, scale, zero_point)
-    dequantized = (quantized - zero_point) * scale
+    quantized = quantize_ste(x, scale, zero_point)
+    dequantized = dequantize_ste(quantized, scale, zero_point)
     return dequantized
+
+
+def to_float_list(tensor: typing.Any) -> list[float]:
+    """Converts a tensor to a list of float values.
+
+    Args:
+        tensor: The input tensor.
+
+    Returns:
+        A list of python float values.
+    """
+    arr = np.asarray(typing.cast(np.ndarray, ops.convert_to_numpy(tensor)))
+    if arr.ndim == 0:
+        return [float(arr)]
+    return [float(x) for x in arr]
+
+
+def to_int_list(tensor: typing.Any) -> list[int]:
+    """Converts a tensor to a list of rounded integer values.
+
+    Args:
+        tensor: The input tensor.
+
+    Returns:
+        A list of python int values.
+    """
+    arr = np.asarray(typing.cast(np.ndarray, ops.convert_to_numpy(tensor)))
+    if arr.ndim == 0:
+        return [int(np.round(arr))]
+    return [int(np.round(x)) for x in arr]
+
+
+def make_quant_write_op(
+    tensor_index: int,
+    scale_tensor: typing.Any,
+    zp_tensor: typing.Any,
+) -> types.QuantizationWriteOp:
+    """Helper to construct a QuantizationWriteOp from Keras scale/zp weights.
+
+    Args:
+        tensor_index: The index of the tensor in the flatbuffer.
+        scale_tensor: The scale weight/tensor.
+        zp_tensor: The zero point weight/tensor.
+
+    Returns:
+        A QuantizationWriteOp populated with Python list values.
+    """
+    scales = to_float_list(scale_tensor)
+    zps = to_int_list(zp_tensor)
+    return types.QuantizationWriteOp(
+        tensor_index=tensor_index,
+        scales=scales,
+        zero_points=zps,
+    )

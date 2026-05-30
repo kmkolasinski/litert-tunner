@@ -5,14 +5,20 @@ Triggers automatic registration of dense and quantize operators.
 
 from __future__ import annotations
 
+from litert_tunner.ops import add as add
 from litert_tunner.ops import dense as dense
+from litert_tunner.ops import logistic as logistic
+from litert_tunner.ops import mul as mul
 from litert_tunner.ops import quantize_op as quantize_op
 from litert_tunner.ops import registry as registry
 from litert_tunner.ops import utils as utils
 
 __all__ = [
     "registry",
+    "add",
     "dense",
+    "logistic",
+    "mul",
     "quantize_op",
     "utils",
 ]

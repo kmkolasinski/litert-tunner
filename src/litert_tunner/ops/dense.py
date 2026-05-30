@@ -18,12 +18,6 @@ from litert_tunner.graph import types
 from litert_tunner.ops import registry, utils
 from litert_tunner.quantization import fake_quant
 
-# Fused activation function codes from TFLite schema
-_FUSED_ACTIVATION_NONE = 0
-_FUSED_ACTIVATION_RELU = 1
-_FUSED_ACTIVATION_RELU_N1_TO_1 = 2
-_FUSED_ACTIVATION_RELU6 = 3
-
 
 class QuantizedDense(keras.Layer):
     """Simulates TFLite's quantized FullyConnected op.
@@ -61,7 +55,7 @@ class QuantizedDense(keras.Layer):
         weight_zero_point: float | np.ndarray,
         output_scale: float,
         output_zero_point: float,
-        fused_activation: int = _FUSED_ACTIVATION_NONE,
+        fused_activation: int = utils.FUSED_ACTIVATION_NONE,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -152,41 +146,27 @@ class QuantizedDense(keras.Layer):
             Output tensor after fake-quantized dense computation.
         """
         # 1. Dequantize input: float = scale * (int8 - zero_point)
-        input_float = self.input_scale * (x - self.input_zero_point)
+        input_float = fake_quant.dequantize_ste(x, self.input_scale, self.input_zero_point)
 
         # 2. Dequantize weights: float = scale * (int8 - zero_point)
         scale_expanded = utils.expand_dims_if_not_scalar(self.weight_scale, 1)
         zp_expanded = utils.expand_dims_if_not_scalar(self.weight_zero_point, 1)
-        weight_float = scale_expanded * (self.weight_int8 - zp_expanded)
+        weight_float = fake_quant.dequantize_ste(self.weight_int8, scale_expanded, zp_expanded)
 
         # 3. Matmul + bias (in float32, simulating INT32 accumulation)
         # TFLite FullyConnected: output = input @ weight^T + bias
         output = ops.matmul(input_float, ops.transpose(weight_float)) + self.bias
 
         # 4. Apply fused activation (before requantization)
-        output = self._apply_fused_activation(output)
+        output = utils.apply_fused_activation(output, self._fused_activation)
 
         # 5. Quantize output to simulated INT8 (with STE for gradient flow)
-        # We use _quantize_ste (not _fake_quantize) so the output stays in simulated
+        # We use quantize_ste (not _fake_quantize) so the output stays in simulated
         # INT8 space. This ensures the next layer's dequantize step works correctly,
         # and the final DEQUANTIZE op converts back to float32.
-        output = fake_quant._quantize_ste(output, self.output_scale, self.output_zero_point)
+        output = fake_quant.quantize_ste(output, self.output_scale, self.output_zero_point)
 
         return output
-
-    def _apply_fused_activation(self, x):
-        """Apply fused activation function."""
-        if self._fused_activation == _FUSED_ACTIVATION_NONE:
-            return x
-        elif self._fused_activation == _FUSED_ACTIVATION_RELU:
-            return ops.relu(x)
-        elif self._fused_activation == _FUSED_ACTIVATION_RELU6:
-            return ops.minimum(ops.relu(x), 6.0)
-        elif self._fused_activation == _FUSED_ACTIVATION_RELU_N1_TO_1:
-            return ops.clip(x, -1.0, 1.0)
-        else:
-            msg = f"Unsupported fused activation: {self._fused_activation}"
-            raise ValueError(msg)
 
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
@@ -247,29 +227,20 @@ class QuantizedDense(keras.Layer):
 
         # Write quantization params
         input_tensor_idx = op_inputs[0]
-        in_scale = utils.to_float_list(self.input_scale)[0]
-        in_zp = utils.to_int_list(self.input_zero_point)[0]
         quant_writes.append(
-            types.QuantizationWriteOp(
-                tensor_index=input_tensor_idx, scales=[in_scale], zero_points=[in_zp]
+            fake_quant.make_quant_write_op(
+                input_tensor_idx, self.input_scale, self.input_zero_point
             )
         )
-
-        w_scales_list = utils.to_float_list(self.weight_scale)
-        w_zps_list = utils.to_int_list(self.weight_zero_point)
-
         quant_writes.append(
-            types.QuantizationWriteOp(
-                tensor_index=weight_tensor_idx, scales=w_scales_list, zero_points=w_zps_list
+            fake_quant.make_quant_write_op(
+                weight_tensor_idx, self.weight_scale, self.weight_zero_point
             )
         )
-
         output_tensor_idx = op_outputs[0]
-        out_scale = utils.to_float_list(self.output_scale)[0]
-        out_zp = utils.to_int_list(self.output_zero_point)[0]
         quant_writes.append(
-            types.QuantizationWriteOp(
-                tensor_index=output_tensor_idx, scales=[out_scale], zero_points=[out_zp]
+            fake_quant.make_quant_write_op(
+                output_tensor_idx, self.output_scale, self.output_zero_point
             )
         )
 
@@ -327,7 +298,7 @@ def build_fully_connected(
         output_units=output_units,
     )
 
-    fused_activation = op.options.get("fused_activation_function", _FUSED_ACTIVATION_NONE)
+    fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
 
     weight_scale_val = utils.get_quant_param_value(weight_quant.scales)
     weight_zp_val = utils.get_quant_param_value(weight_quant.zero_points)

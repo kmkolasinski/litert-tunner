@@ -13,6 +13,12 @@ from keras import ops
 
 from litert_tunner.graph import types
 
+# Fused activation function codes from TFLite schema
+FUSED_ACTIVATION_NONE = 0
+FUSED_ACTIVATION_RELU = 1
+FUSED_ACTIVATION_RELU_N1_TO_1 = 2
+FUSED_ACTIVATION_RELU6 = 3
+
 
 def expand_dims_if_not_scalar(tensor: typing.Any, axis: int) -> typing.Any:
     """Expands the dimensions of a tensor if it is not a scalar (ndim > 0).
@@ -27,36 +33,6 @@ def expand_dims_if_not_scalar(tensor: typing.Any, axis: int) -> typing.Any:
     if len(tensor.shape) > 0:
         return ops.expand_dims(tensor, axis)
     return tensor
-
-
-def to_float_list(tensor: typing.Any) -> list[float]:
-    """Converts a tensor to a list of float values.
-
-    Args:
-        tensor: The input tensor.
-
-    Returns:
-        A list of python float values.
-    """
-    arr = np.asarray(typing.cast(np.ndarray, ops.convert_to_numpy(tensor)))
-    if arr.ndim == 0:
-        return [float(arr)]
-    return [float(x) for x in arr]
-
-
-def to_int_list(tensor: typing.Any) -> list[int]:
-    """Converts a tensor to a list of rounded integer values.
-
-    Args:
-        tensor: The input tensor.
-
-    Returns:
-        A list of python int values.
-    """
-    arr = np.asarray(typing.cast(np.ndarray, ops.convert_to_numpy(tensor)))
-    if arr.ndim == 0:
-        return [int(np.round(arr))]
-    return [int(np.round(x)) for x in arr]
 
 
 def quantize_to_int8(tensor: typing.Any) -> np.ndarray:
@@ -138,3 +114,26 @@ def get_bias_float32(
             bias_scale = input_scale * weight_scales.astype(np.float64)
             return bias_tensor.data.astype(np.float32) * bias_scale.astype(np.float32)
     return np.zeros(output_units, dtype=np.float32)
+
+
+def apply_fused_activation(x: typing.Any, fused_activation: int) -> typing.Any:
+    """Applies a TFLite fused activation function to a tensor.
+
+    Args:
+        x: Input Keras tensor.
+        fused_activation: Code of the fused activation function.
+
+    Returns:
+        The tensor after applying the activation.
+    """
+    if fused_activation == FUSED_ACTIVATION_NONE:
+        return x
+    elif fused_activation == FUSED_ACTIVATION_RELU:
+        return ops.relu(x)
+    elif fused_activation == FUSED_ACTIVATION_RELU6:
+        return ops.minimum(ops.relu(x), 6.0)
+    elif fused_activation == FUSED_ACTIVATION_RELU_N1_TO_1:
+        return ops.clip(x, -1.0, 1.0)
+    else:
+        msg = f"Unsupported fused activation: {fused_activation}"
+        raise ValueError(msg)
