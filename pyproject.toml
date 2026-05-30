@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "litert_tunner"
+version = "0.1.0"
+description = "LiteRT tuner Python library."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "litert-tunner contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "bump-my-version>=0.26.0",
+  "pre-commit>=3.7.0",
+  "pytest>=8.2.0",
+  "ruff>=0.5.0",
+  "ty>=0.0.1a8",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.bumpversion]
+current_version = "0.1.0"
+commit = true
+tag = false
+allow_dirty = false
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "src/litert_tunner/__init__.py"
+search = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'
