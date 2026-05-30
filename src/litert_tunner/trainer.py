@@ -1,3 +1,4 @@
+import logging
 import re
 from collections.abc import Callable, Mapping
 from typing import Any, TypeAlias
@@ -9,6 +10,8 @@ from keras import ops
 # Generic types to document Keras backend-agnostic tensors and data structures
 TensorLike: TypeAlias = keras.KerasTensor | np.ndarray | float | int
 DataStruct: TypeAlias = TensorLike | dict[str, Any] | list[Any] | tuple[Any, ...]
+
+logger = logging.getLogger(__name__)
 
 
 def prepare_for_finetuning(
@@ -25,6 +28,12 @@ def prepare_for_finetuning(
     for v in model.variables:
         if pattern.search(v.path):
             v.trainable = True
+            logger.info(
+                "Variable taken for training: path=%s, dtype=%s, shape=%s",
+                v.path,
+                v.dtype,
+                v.shape,
+            )
         else:
             v.trainable = False
 

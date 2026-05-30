@@ -7,7 +7,7 @@ import litert_tunner
 from tests import conftest
 
 
-def test__trainer_finetuning_e2e(temp_model_dir):
+def test__trainer_finetuning_e2e(temp_model_dir, caplog):
     """Verifies that the generic Trainer works for fine-tuning a quantized model."""
     # 1. Create a simple base Keras model
     input_shape = (8,)
@@ -26,7 +26,22 @@ def test__trainer_finetuning_e2e(temp_model_dir):
     litert_model = litert_tunner.load_model(str(output_path))
 
     # 4. Prepare for fine-tuning (freeze weights, unfreeze biases and scales)
-    litert_tunner.prepare_for_finetuning(litert_model)
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        litert_tunner.prepare_for_finetuning(litert_model)
+
+    # Verify that the variables taken for training were logged
+    assert len(caplog.records) > 0
+    training_log_found = False
+    for record in caplog.records:
+        if "Variable taken for training: path=" in record.message:
+            training_log_found = True
+            # Check for path, dtype, shape in the log message
+            assert "path=" in record.message
+            assert "dtype=" in record.message
+            assert "shape=" in record.message
+    assert training_log_found, "Logging for trainable variables not found."
 
     # Verify trainability (only biases and scales should be trainable)
     trainable_count = 0
