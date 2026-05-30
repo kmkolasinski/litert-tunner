@@ -1,4 +1,3 @@
-import logging
 import re
 from collections.abc import Callable, Mapping
 from typing import Any, TypeAlias
@@ -7,35 +6,15 @@ import keras
 import numpy as np
 from keras import ops
 
+from litert_tunner import logging
+
+logger = logging.get_logger()
+
+
 # Generic types to document Keras backend-agnostic tensors and data structures
 TensorLike: TypeAlias = keras.KerasTensor | np.ndarray | float | int
 DataStruct: TypeAlias = TensorLike | dict[str, Any] | list[Any] | tuple[Any, ...]
-
-logger = logging.getLogger(__name__)
-
-
-def prepare_for_finetuning(
-    model: keras.Model, trainable_pattern: str = r".*(bias|weight_scale)$"
-) -> None:
-    """Freezes all model variables except those matching the pattern.
-
-    Args:
-        model: The Keras model to prepare for fine-tuning.
-        trainable_pattern: Regex pattern matching the paths of variables that should
-            remain trainable (e.g., biases and scales).
-    """
-    pattern = re.compile(trainable_pattern)
-    for v in model.variables:
-        if pattern.search(v.path):
-            v.trainable = True
-            logger.info(
-                "Variable taken for training: path=%s, dtype=%s, shape=%s",
-                v.path,
-                v.dtype,
-                v.shape,
-            )
-        else:
-            v.trainable = False
+MetricFunc: TypeAlias = Callable[[keras.KerasTensor, keras.KerasTensor], keras.KerasTensor]
 
 
 class Trainer(keras.Model):
@@ -53,10 +32,9 @@ class Trainer(keras.Model):
         self,
         litert_model: keras.Model,
         base_model: keras.Model,
-        distillation_loss_fn: Callable[[TensorLike, TensorLike], keras.KerasTensor] | None = None,
-        l2_weight_decay: float = 0.1,
-        extra_metrics: Mapping[str, Callable[[TensorLike, TensorLike], keras.KerasTensor]]
-        | None = None,
+        distillation_loss_fn: MetricFunc | None = None,
+        l2_weight_decay: float = 0.01,
+        extra_metrics: Mapping[str, MetricFunc] | None = None,
         **kwargs,
     ):
         """Initializes the trainer.
@@ -171,3 +149,56 @@ class Trainer(keras.Model):
 
         # Let the base class update standard compiled metrics (like the total loss)
         return super().compute_metrics(x=x, y=y, y_pred=y_pred, sample_weight=sample_weight)  # pyright: ignore[reportReturnType]
+
+
+def prepare_for_finetuning(
+    model: keras.Model, trainable_pattern: str = r".*(bias|weight_scale)$"
+) -> None:
+    """Freezes all model variables except those matching the pattern.
+
+    Args:
+        model: The Keras model to prepare for fine-tuning.
+        trainable_pattern: Regex pattern matching the paths of variables that should
+            remain trainable (e.g., biases and scales).
+    """
+    total_vars = 0
+    trainable_vars = 0
+    total_params = 0
+    trainable_params = 0
+
+    pattern = re.compile(trainable_pattern)
+    for v in model.variables:
+        # Calculate size of the variable
+        size = 1
+        if v.shape:
+            for d in v.shape:
+                if d is not None:
+                    size *= d
+
+        total_vars += 1
+        total_params += size
+
+        if pattern.search(v.path):
+            v.trainable = True
+            trainable_vars += 1
+            trainable_params += size
+            logger.info(
+                "Variable taken for training: path=%s, dtype=%s, shape=%s",
+                v.path,
+                v.dtype,
+                v.shape,
+            )
+        else:
+            v.trainable = False
+
+    logger.info(
+        "Finetuning statistics:\n"
+        "  Trainable variables: %d / %d (%.2f%%)\n"
+        "  Trainable parameters: %d / %d (%.2f%%)",
+        trainable_vars,
+        total_vars,
+        (trainable_vars / total_vars * 100.0) if total_vars > 0 else 0.0,
+        trainable_params,
+        total_params,
+        (trainable_params / total_params * 100.0) if total_params > 0 else 0.0,
+    )

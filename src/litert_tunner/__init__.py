@@ -2,7 +2,7 @@
 
 import keras
 
-from litert_tunner import flatbuffer, graph, ops
+from litert_tunner import flatbuffer, graph, logging, ops
 from litert_tunner.trainer import Trainer, prepare_for_finetuning
 
 __version__ = "0.1.0"
@@ -36,6 +36,7 @@ __all__ = [
     "flatbuffer",
     "graph",
     "load_model",
+    "logging",
     "ops",
     "prepare_for_finetuning",
     "save_model",

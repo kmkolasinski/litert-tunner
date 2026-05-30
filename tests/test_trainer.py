@@ -33,6 +33,7 @@ def test__trainer_finetuning_e2e(temp_model_dir, caplog):
     # Verify that the variables taken for training were logged
     assert len(caplog.records) > 0
     training_log_found = False
+    stats_log_found = False
     for record in caplog.records:
         if "Variable taken for training: path=" in record.message:
             training_log_found = True
@@ -40,7 +41,12 @@ def test__trainer_finetuning_e2e(temp_model_dir, caplog):
             assert "path=" in record.message
             assert "dtype=" in record.message
             assert "shape=" in record.message
+        elif "Finetuning statistics:" in record.message:
+            stats_log_found = True
+            assert "Trainable variables:" in record.message
+            assert "Trainable parameters:" in record.message
     assert training_log_found, "Logging for trainable variables not found."
+    assert stats_log_found, "Finetuning statistics log not found."
 
     # Verify trainability (only biases and scales should be trainable)
     trainable_count = 0
