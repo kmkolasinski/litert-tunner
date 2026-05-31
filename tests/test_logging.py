@@ -1,6 +1,7 @@
 """Tests for the logging configuration submodule."""
 
 import logging
+
 from litert_tunner import logging as litert_logging
 
 

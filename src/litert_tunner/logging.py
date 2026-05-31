@@ -4,9 +4,7 @@ import logging
 import sys
 
 
-def get_logger(
-    name: str = "litert_tunner", level: int = logging.INFO
-) -> logging.Logger:
+def get_logger(name: str = "litert_tunner", level: int = logging.INFO) -> logging.Logger:
     """Configures and returns a logger with a default stdio stream handler.
 
     Args:
