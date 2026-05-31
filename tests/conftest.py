@@ -231,8 +231,8 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
 
 
 @pytest.fixture
-def make_efficientnetb0_tflite(temp_model_dir: Path) -> Callable:
-    """Fixture returning a function to create fully quantized INT8 EfficientNetB0 TFLite models."""
+def make_backbone_tflite(temp_model_dir: Path) -> Callable:
+    """Fixture returning a function to create fully quantized INT8 backbone-based TFLite models."""
 
     def _make(
         input_shape: tuple[int, int, int] = (96, 96, 3),
@@ -240,11 +240,13 @@ def make_efficientnetb0_tflite(temp_model_dir: Path) -> Callable:
         num_outputs: int = 10,
         float_io: bool = True,
         seed: int = 42,
+        backbone_name: str = "EfficientNetB0",
     ) -> Path:
         tf.random.set_seed(seed)
 
-        # Build Keras model using EfficientNetB0 backbone and custom classification head
-        backbone = keras.applications.EfficientNetB0(
+        # Build Keras model using selected backbone and custom classification head
+        backbone_cls = getattr(keras.applications, backbone_name)
+        backbone = backbone_cls(
             include_top=False,
             weights=cast("Any", weights),
             input_shape=input_shape,
@@ -268,13 +270,19 @@ def make_efficientnetb0_tflite(temp_model_dir: Path) -> Callable:
         weights_str = str(weights)
         output_path = (
             temp_model_dir
-            / f"efficientnetb0_{shape_str}_{weights_str}_{num_outputs}_{float_io}.tflite"
+            / f"{backbone_name.lower()}_{shape_str}_{weights_str}_{num_outputs}_{float_io}.tflite"
         )
         export_quantized_tflite_model(input_shape, model, float_io, output_path)
 
         return output_path
 
     return _make
+
+
+@pytest.fixture
+def make_efficientnetb0_tflite(make_backbone_tflite: Callable) -> Callable:
+    """Backward compatible wrapper for make_backbone_tflite."""
+    return make_backbone_tflite
 
 
 def export_quantized_tflite_model(
@@ -309,29 +317,43 @@ def export_quantized_tflite_model(
 def run_interpreter() -> Callable:
     """Fixture returning a function to run LiteRT/TFLite Interpreter on a model."""
 
-    def _run(model_path: Path | str, input_data: np.ndarray) -> np.ndarray:
+    def _run(
+        model_path: Path | str, input_data: np.ndarray | list[np.ndarray]
+    ) -> np.ndarray | list[np.ndarray]:
         interpreter = Interpreter(model_path=str(model_path))
         input_details = interpreter.get_input_details()
-        interpreter.resize_tensor_input(input_details[0]["index"], list(input_data.shape))
+
+        if not isinstance(input_data, list):
+            input_data_list = [input_data]
+        else:
+            input_data_list = input_data
+
+        for i, in_data in enumerate(input_data_list):
+            interpreter.resize_tensor_input(input_details[i]["index"], list(in_data.shape))
+
         interpreter.allocate_tensors()
 
         output_details = interpreter.get_output_details()
 
         # Handle INT8 input type conversion / scaling
-        in_dtype = input_details[0]["dtype"]
-        if in_dtype == np.int8:
-            scale, zero_point = input_details[0]["quantization"]
-            if scale > 0:
-                quant_input = np.round(input_data / scale) + zero_point
-                quant_input = np.clip(quant_input, -128, 127).astype(np.int8)
-                interpreter.set_tensor(input_details[0]["index"], quant_input)
+        for i, in_data in enumerate(input_data_list):
+            in_dtype = input_details[i]["dtype"]
+            if in_dtype == np.int8:
+                scale, zero_point = input_details[i]["quantization"]
+                if scale > 0:
+                    quant_input = np.round(in_data / scale) + zero_point
+                    quant_input = np.clip(quant_input, -128, 127).astype(np.int8)
+                    interpreter.set_tensor(input_details[i]["index"], quant_input)
+                else:
+                    interpreter.set_tensor(input_details[i]["index"], in_data.astype(np.int8))
             else:
-                interpreter.set_tensor(input_details[0]["index"], input_data.astype(np.int8))
-        else:
-            interpreter.set_tensor(input_details[0]["index"], input_data.astype(np.float32))
+                interpreter.set_tensor(input_details[i]["index"], in_data.astype(np.float32))
 
         interpreter.invoke()
 
-        return interpreter.get_tensor(output_details[0]["index"])
+        outputs = [interpreter.get_tensor(out["index"]) for out in output_details]
+        if len(outputs) == 1:
+            return outputs[0]
+        return outputs
 
     return _run

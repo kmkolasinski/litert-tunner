@@ -285,3 +285,26 @@ def test__conv2d_save_roundtrip(make_resnet_tflite: Callable, run_interpreter: C
 
     saved_outputs = run_interpreter(model_path, x_train)
     np.testing.assert_allclose(litert_outputs, saved_outputs, atol=1e-3)
+
+
+def test__conv2d_integration(temp_model_dir, run_interpreter):
+    import keras
+    import numpy as np
+    import tensorflow as tf
+
+    from tests.conftest import export_quantized_tflite_model
+
+    tf.random.set_seed(42)
+
+    inputs = keras.Input(shape=(8, 8, 3))
+    outputs = keras.layers.Conv2D(8, 3)(inputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    input_shape = (1, 8, 8, 3)
+
+    output_path = temp_model_dir / "conv2d_integration.tflite"
+    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)

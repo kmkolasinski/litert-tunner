@@ -503,3 +503,26 @@ class TestDequantizeLayer:
         assert config["scale"] == scale
         assert config["zero_point"] == zero_point
         assert config["passthrough"] is True
+
+
+def test__quantize_op_integration(temp_model_dir, run_interpreter):
+    import keras
+    import numpy as np
+    import tensorflow as tf
+
+    from tests.conftest import export_quantized_tflite_model
+
+    tf.random.set_seed(42)
+
+    inputs = keras.Input(shape=(4,))
+    outputs = keras.layers.Dense(4)(inputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    input_shape = (1, 4)
+
+    output_path = temp_model_dir / "quantize_op_integration.tflite"
+    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)

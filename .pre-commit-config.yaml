@@ -14,23 +14,7 @@ repos:
       # - id: no-commit-to-branch
       #   args:
       #   - --branch=main
-
-  # Markdown Formatting
-  - repo: https://github.com/executablebooks/mdformat
-    rev: 0.7.22
-    hooks:
-      - id: mdformat
-        additional_dependencies:
-          - mdformat-gfm
-          - mdformat-black
-
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.45.0
-    hooks:
-      - id: markdownlint
-        args: ["--config", ".markdownlint.json"]
-      - id: markdownlint-fix
-
+      
   # Code Quality
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.2
@@ -68,3 +52,19 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+  # Markdown Formatting
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.22
+    hooks:
+      - id: mdformat
+        additional_dependencies:
+          - mdformat-gfm
+          - mdformat-black
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.45.0
+    hooks:
+      - id: markdownlint
+        args: ["--config", ".markdownlint.json"]
+      - id: markdownlint-fix

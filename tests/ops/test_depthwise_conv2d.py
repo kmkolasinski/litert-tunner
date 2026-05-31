@@ -241,7 +241,8 @@ class TestDepthwiseConv2DWriteOps:
 @pytest.fixture
 def make_depthwise_conv_tflite(tmp_path) -> Callable:
     """Fixture returning a function to create fully quantized INT8 DepthwiseConv2D models."""
-    import tensorflow as tf  # noqa: PLC0415
+    import keras  # noqa: PLC0415
+    import tensorflow as tf
 
     from tests.conftest import export_quantized_tflite_model  # noqa: PLC0415
 
@@ -348,3 +349,26 @@ def test__depthwise_conv2d_save_roundtrip(
 
     saved_outputs = run_interpreter(model_path, x_train)
     np.testing.assert_allclose(litert_outputs, saved_outputs, atol=1e-3)
+
+
+def test__depthwise_conv2d_integration(temp_model_dir, run_interpreter):
+    import keras
+    import numpy as np
+    import tensorflow as tf
+
+    from tests.conftest import export_quantized_tflite_model
+
+    tf.random.set_seed(42)
+
+    inputs = keras.Input(shape=(8, 8, 3))
+    outputs = keras.layers.DepthwiseConv2D(3)(inputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    input_shape = (1, 8, 8, 3)
+
+    output_path = temp_model_dir / "depthwise_conv2d_integration.tflite"
+    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)

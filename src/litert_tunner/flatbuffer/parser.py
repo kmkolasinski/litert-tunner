@@ -94,6 +94,7 @@ _BUILTIN_OPTIONS_MAP: dict[int, type] = {
     tflite.BuiltinOptions.ArgMaxOptions: tflite.ArgMaxOptions,
     tflite.BuiltinOptions.ArgMinOptions: tflite.ArgMinOptions,
     tflite.BuiltinOptions.BatchMatMulOptions: tflite.BatchMatMulOptions,
+    tflite.BuiltinOptions.GeluOptions: tflite.GeluOptions,
     # Quantization-related
     tflite.BuiltinOptions.QuantizeOptions: tflite.QuantizeOptions,
     tflite.BuiltinOptions.DequantizeOptions: tflite.DequantizeOptions,

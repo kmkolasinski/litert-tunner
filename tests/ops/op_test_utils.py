@@ -12,6 +12,9 @@ satisfy:
 
 from __future__ import annotations
 
+import pathlib
+import typing
+
 import keras
 import numpy as np
 
@@ -317,3 +320,48 @@ def assert_buffer_write_tensor_indices(
         f"  Expected: {sorted(expected_indices)}\n"
         f"  Actual:   {sorted(actual_indices)}"
     )
+
+
+def verify_model_outputs(
+    model_path: pathlib.Path | str,
+    x_train: np.ndarray | list[np.ndarray],
+    run_interpreter: typing.Callable,
+    atol: float = 0.001,
+) -> None:
+    """Verify that the tunner Keras model output matches LiteRT Interpreter.
+
+    This helper loads the exported TFLite model, runs it through Keras,
+    compares predictions, saves it back, and compares predictions again.
+
+    Args:
+        model_path: Path to the .tflite model file.
+        x_train: Input data for prediction.
+        run_interpreter: The pytest fixture for running the LiteRT Interpreter.
+        atol: Absolute tolerance for np.testing.assert_allclose.
+    """
+    import litert_tunner
+
+    # Get original LiteRT output
+    litert_outputs = run_interpreter(model_path, x_train)
+
+    # Compare original LiteRT model with Keras parsed
+    keras_model = litert_tunner.load_model(str(model_path))
+    keras_outputs = keras_model.predict(x_train)
+
+    # Keras outputs might be a list or single array, LiteRT outputs might be a list or single array
+    # Usually we compare them directly or iteratively if lists.
+    if isinstance(litert_outputs, list) and isinstance(keras_outputs, list):
+        for litert_out, keras_out in zip(litert_outputs, keras_outputs, strict=True):
+            np.testing.assert_allclose(litert_out, keras_out, atol=atol)
+    else:
+        np.testing.assert_allclose(litert_outputs, keras_outputs, atol=atol)
+
+    # Save the model and make sure the outputs are still the same
+    litert_tunner.save_model(keras_model, str(model_path))
+    litert_saved_outputs = run_interpreter(model_path, x_train)
+
+    if isinstance(litert_saved_outputs, list) and isinstance(keras_outputs, list):
+        for saved_out, keras_out in zip(litert_saved_outputs, keras_outputs, strict=True):
+            np.testing.assert_allclose(keras_out, saved_out, atol=atol)
+    else:
+        np.testing.assert_allclose(keras_outputs, litert_saved_outputs, atol=atol)

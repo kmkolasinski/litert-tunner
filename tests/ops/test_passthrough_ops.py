@@ -350,3 +350,26 @@ class TestPack:
 
         layer, _ = op_test_utils.build_and_call(op, tensors, np.array(1.0, dtype=np.float32))
         op_test_utils.assert_layer_not_writable(layer)
+
+
+def test__passthrough_ops_integration(temp_model_dir, run_interpreter):
+    import keras
+    import numpy as np
+    import tensorflow as tf
+
+    from tests.conftest import export_quantized_tflite_model
+
+    tf.random.set_seed(42)
+
+    inputs = keras.Input(shape=(4, 4))
+    x = keras.layers.Reshape((16,))(inputs)
+    model = keras.Model(inputs=inputs, outputs=x)
+    input_shape = (1, 4, 4)
+
+    output_path = temp_model_dir / "passthrough_ops_integration.tflite"
+    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)

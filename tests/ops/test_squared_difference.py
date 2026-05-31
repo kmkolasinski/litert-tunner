@@ -1,4 +1,6 @@
-"""Tests for ADD operator."""
+"""Tests for SQUARED_DIFFERENCE operator."""
+
+from __future__ import annotations
 
 import keras
 import numpy as np
@@ -10,8 +12,8 @@ from tests.ops import op_test_utils
 
 
 @pytest.fixture
-def add_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
-    """Create a minimal ADD op with INT8 I/O."""
+def sd_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a minimal SQUARED_DIFFERENCE op with INT8 I/O."""
     input1_quant = op_test_utils.make_quant_params(scales=[0.1], zero_points=[-5])
     input1_tensor = op_test_utils.make_tensor(
         name="input1_int8", index=0, shape=(1, 4), dtype=types.DTYPE_INT8, quantization=input1_quant
@@ -29,32 +31,38 @@ def add_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
 
     tensors = (input1_tensor, input2_tensor, output_tensor)
     op = op_test_utils.make_operator(
-        op_type="ADD",
+        op_type="SQUARED_DIFFERENCE",
         input_indices=(0, 1),
         output_indices=(2,),
     )
     return op, tensors
 
 
-class TestAddBuild:
-    def test__add_is_registered(self):
-        assert "ADD" in registry.registered_ops()
+class TestSquaredDifferenceBuild:
+    def test__squared_difference_is_registered(self) -> None:
+        assert "SQUARED_DIFFERENCE" in registry.registered_ops()
 
-    def test__build_returns_keras_layer(self, add_setup):
-        op, tensors = add_setup
+    def test__build_returns_keras_layer(
+        self, sd_setup: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
+    ) -> None:
+        op, tensors = sd_setup
         layer = op_test_utils.build_layer_from_registry(op, tensors)
         assert isinstance(layer, keras.Layer)
 
-    def test__build_layer_name_contains_output_index(self, add_setup):
-        op, tensors = add_setup
+    def test__build_layer_name_contains_output_index(
+        self, sd_setup: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
+    ) -> None:
+        op, tensors = sd_setup
         layer = op_test_utils.build_layer_from_registry(op, tensors)
         output_idx = op.output_indices[0]
         assert layer.name.endswith(f"_{output_idx}")
 
 
-class TestAddCall:
-    def test__output_shape_matches_expected(self, add_setup):
-        op, tensors = add_setup
+class TestSquaredDifferenceCall:
+    def test__output_shape_matches_expected(
+        self, sd_setup: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
+    ) -> None:
+        op, tensors = sd_setup
         rng = np.random.default_rng(42)
         input_data = [
             rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32),
@@ -63,27 +71,39 @@ class TestAddCall:
         _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
         op_test_utils.assert_output_shape(output, (1, 4))
 
-    def test__add_formula_matches_expected(self, add_setup):
-        """Verify add computation produces correct simulated INT8 output."""
-        op, tensors = add_setup
-        input1_data = np.array([[-2, 1, 0, 3]], dtype=np.float32)
-        input2_data = np.array([[10, -10, 0, 20]], dtype=np.float32)
+    def test__squared_difference_formula_matches_expected(
+        self, sd_setup: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
+    ) -> None:
+        """Verify squared difference computation produces correct simulated INT8 output."""
+        op, tensors = sd_setup
+        input1_data = np.array([[-5, 5, -15, 15]], dtype=np.float32)
+        input2_data = np.array([[0, 5, 0, 10]], dtype=np.float32)
 
         _, output = op_test_utils.build_and_call(op, tensors, [input1_data, input2_data])
 
-        expected = np.array([[15.0, 7.0, 11.0, 20.0]], dtype=np.float32)
+        expected = np.array([[10.0, 10.0, 12.0, 10.0]], dtype=np.float32)
         np.testing.assert_allclose(output, expected, atol=1e-5)
 
 
-class TestAddTrainableWeights:
-    def test__trainable_weights(self, add_setup):
-        op, tensors = add_setup
+class TestSquaredDifferenceTrainableWeights:
+    def test__trainable_weights(
+        self, sd_setup: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
+    ) -> None:
+        op, tensors = sd_setup
         inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
-        op_test_utils.assert_trainable_weight_names(layer, {"output_scale", "output_zero_point"})
+        op_test_utils.assert_trainable_weight_names(
+            layer,
+            {
+                "output_scale",
+                "output_zero_point",
+            },
+        )
 
-    def test__non_trainable_weights(self, add_setup):
-        op, tensors = add_setup
+    def test__non_trainable_weights(
+        self, sd_setup: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
+    ) -> None:
+        op, tensors = sd_setup
         inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
         op_test_utils.assert_non_trainable_weight_names(
@@ -97,15 +117,19 @@ class TestAddTrainableWeights:
         )
 
 
-class TestAddWriteOps:
-    def test__is_writable(self, add_setup):
-        op, tensors = add_setup
+class TestSquaredDifferenceWriteOps:
+    def test__is_writable(
+        self, sd_setup: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
+    ) -> None:
+        op, tensors = sd_setup
         inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
         op_test_utils.assert_layer_is_writable(layer)
 
-    def test__write_ops_counts(self, add_setup):
-        op, tensors = add_setup
+    def test__write_ops_counts(
+        self, sd_setup: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
+    ) -> None:
+        op, tensors = sd_setup
         inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
         op_test_utils.assert_collect_write_ops(
@@ -115,8 +139,10 @@ class TestAddWriteOps:
             expected_quant_writes=3,
         )
 
-    def test__write_ops_quant_indices(self, add_setup):
-        op, tensors = add_setup
+    def test__write_ops_quant_indices(
+        self, sd_setup: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
+    ) -> None:
+        op, tensors = sd_setup
         inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
         _, quant_writes = layer.collect_write_ops(op)
@@ -125,7 +151,7 @@ class TestAddWriteOps:
         )
 
 
-def test__add_integration(temp_model_dir, run_interpreter):
+def test__squared_difference_integration(temp_model_dir, run_interpreter):
     import keras
     import numpy as np
     import tensorflow as tf
@@ -137,11 +163,12 @@ def test__add_integration(temp_model_dir, run_interpreter):
     inputs = keras.Input(shape=(4,))
     x = keras.layers.Dense(4)(inputs)
     y = keras.layers.Dense(4)(inputs)
-    outputs = keras.layers.Add()([x, y])
+    # Using tf operation to ensure it maps to SquaredDifference
+    outputs = keras.layers.Lambda(lambda args: tf.math.squared_difference(args[0], args[1]))([x, y])
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 4)
 
-    output_path = temp_model_dir / "add_integration.tflite"
+    output_path = temp_model_dir / "squared_difference_integration.tflite"
     export_quantized_tflite_model(input_shape[1:], model, True, output_path)
 
     rng = np.random.default_rng(42)

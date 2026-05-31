@@ -145,3 +145,26 @@ class TestMaxPool2DNotWritable:
             op, tensors, np.zeros((1, 4, 4, 2), dtype=np.float32)
         )
         assert len(layer.trainable_weights) == 0
+
+
+def test__pool_integration(temp_model_dir, run_interpreter):
+    import keras
+    import numpy as np
+    import tensorflow as tf
+
+    from tests.conftest import export_quantized_tflite_model
+
+    tf.random.set_seed(42)
+
+    inputs = keras.Input(shape=(8, 8, 3))
+    outputs = keras.layers.MaxPooling2D()(inputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    input_shape = (1, 8, 8, 3)
+
+    output_path = temp_model_dir / "pool_integration.tflite"
+    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
