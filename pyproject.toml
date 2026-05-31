@@ -167,3 +167,9 @@ quiet = false
 whitelist-regex = []
 color = true
 omit-covered-files = false
+
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["."]
+venvPath = "."
+venv = ".venv"
