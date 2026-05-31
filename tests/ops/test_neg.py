@@ -202,7 +202,7 @@ def test__neg_integration(temp_model_dir, run_interpreter):
     tf.random.set_seed(42)
 
     inputs = keras.Input(shape=(4,))
-    outputs = -inputs
+    outputs = keras.ops.negative(inputs)
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 4)
 

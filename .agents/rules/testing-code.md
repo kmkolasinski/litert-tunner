@@ -1,10 +1,7 @@
-______________________________________________________________________
-
-## trigger: model_decision description: Instructions for writing or refactoring the existing code
-
-______________________________________________________________________
-
-## trigger: model_decision description: Instructions for writing or refactoring the existing code
+---
+trigger: model_decision
+description: Instructions for testing new of refactored code
+---
 
 After changes remember about automatic code check!
 
