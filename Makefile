@@ -4,15 +4,29 @@ help: ## Print this message and exit.
 # change shell from sh to bash, it enables source command in makefile
 SHELL := /bin/bash
 
+# Prepend the virtual environment's bin directory to PATH
+export PATH := $(CURDIR)/.venv/bin:$(PATH)
 
-venv: ## Creates a virtual environment using uv
-	uv venv
+init: venv ## One-time dev setup: installs uv into the venv and pre-commit hooks
+	pip install uv
+	uv run --with pre-commit pre-commit install
+	@echo "Done! Run 'make install' to install project dependencies."
+
+venv: ## Creates a virtual environment
+	python3 -m venv .venv
 
 install: ## Installs the project in editable mode with dev dependencies
 	uv pip install -e ".[dev]"
 
 test: ## Runs the tests with coverage and parallel execution
-	python -m pytest -n 4 --durations=20 --forked --cov=litert_tunner --cov-branch --cov-report=term --cov-report=html:test-results/htmlcov --no-cov-on-fail --cov-fail-under=70
+	python -m pytest -n 4 --forked \
+		--durations=20 \
+		--cov=litert_tunner \
+		--cov-branch \
+		--cov-report=term \
+		--cov-report=html:test-results/htmlcov \
+		--no-cov-on-fail \
+		--cov-fail-under=70
 
 precommit: ## Runs the pre-commit hooks
 	pre-commit run --all-files
