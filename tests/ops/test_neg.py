@@ -5,9 +5,11 @@ from __future__ import annotations
 import keras
 import numpy as np
 import pytest
+import tensorflow as tf
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
+from tests.conftest import export_quantized_tflite_model
 from tests.ops import op_test_utils
 
 
@@ -197,12 +199,6 @@ class TestNegNoQuant:
 
 
 def test__neg_integration(temp_model_dir, run_interpreter):
-    import keras
-    import numpy as np
-    import tensorflow as tf
-
-    from tests.conftest import export_quantized_tflite_model
-
     tf.random.set_seed(42)
 
     inputs = keras.Input(shape=(4,))

@@ -1,4 +1,4 @@
-exclude: "^docs/|/migrations/|pull_request_template.md"
+exclude: '^docs/|/migrations/|pull_request_template.md|^\.agents/'
 default_stages: [pre-commit]
 fail_fast: true
 
@@ -14,7 +14,7 @@ repos:
       # - id: no-commit-to-branch
       #   args:
       #   - --branch=main
-      
+
   # Code Quality
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.2
@@ -48,7 +48,7 @@ repos:
     hooks:
       - id: ty
         name: ty
-        entry: ty check
+        entry: .venv/bin/ty check
         language: system
         types: [python]
         pass_filenames: false
@@ -66,5 +66,7 @@ repos:
     rev: v0.45.0
     hooks:
       - id: markdownlint
+        language_version: "22.2.0"
         args: ["--config", ".markdownlint.json"]
       - id: markdownlint-fix
+        language_version: "22.2.0"

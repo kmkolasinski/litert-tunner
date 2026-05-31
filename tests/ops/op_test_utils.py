@@ -12,12 +12,16 @@ satisfy:
 
 from __future__ import annotations
 
-import pathlib
-import typing
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    import pathlib
+    import typing
 
 import keras
 import numpy as np
 
+import litert_tunner
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
 
@@ -339,8 +343,6 @@ def verify_model_outputs(
         run_interpreter: The pytest fixture for running the LiteRT Interpreter.
         atol: Absolute tolerance for np.testing.assert_allclose.
     """
-    import litert_tunner
-
     # Get original LiteRT output
     litert_outputs = run_interpreter(model_path, x_train)
 
@@ -348,20 +350,22 @@ def verify_model_outputs(
     keras_model = litert_tunner.load_model(str(model_path))
     keras_outputs = keras_model.predict(x_train)
 
-    # Keras outputs might be a list or single array, LiteRT outputs might be a list or single array
-    # Usually we compare them directly or iteratively if lists.
-    if isinstance(litert_outputs, list) and isinstance(keras_outputs, list):
+    if isinstance(litert_outputs, list):
+        assert isinstance(keras_outputs, list), "Expected list of Keras outputs"
         for litert_out, keras_out in zip(litert_outputs, keras_outputs, strict=True):
-            np.testing.assert_allclose(litert_out, keras_out, atol=atol)
+            np.testing.assert_allclose(cast("Any", litert_out), cast("Any", keras_out), atol=atol)
     else:
+        assert isinstance(litert_outputs, np.ndarray), "Expected numpy array from LiteRT"
         np.testing.assert_allclose(litert_outputs, keras_outputs, atol=atol)
 
     # Save the model and make sure the outputs are still the same
     litert_tunner.save_model(keras_model, str(model_path))
     litert_saved_outputs = run_interpreter(model_path, x_train)
 
-    if isinstance(litert_saved_outputs, list) and isinstance(keras_outputs, list):
+    if isinstance(litert_saved_outputs, list):
+        assert isinstance(keras_outputs, list), "Expected list of Keras outputs"
         for saved_out, keras_out in zip(litert_saved_outputs, keras_outputs, strict=True):
-            np.testing.assert_allclose(keras_out, saved_out, atol=atol)
+            np.testing.assert_allclose(cast("Any", keras_out), cast("Any", saved_out), atol=atol)
     else:
+        assert isinstance(litert_saved_outputs, np.ndarray), "Expected numpy array from LiteRT"
         np.testing.assert_allclose(keras_outputs, litert_saved_outputs, atol=atol)

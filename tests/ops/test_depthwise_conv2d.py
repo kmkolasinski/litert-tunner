@@ -10,10 +10,12 @@ if TYPE_CHECKING:
 import keras
 import numpy as np
 import pytest
+import tensorflow as tf
 
 import litert_tunner
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
+from tests.conftest import export_quantized_tflite_model
 from tests.ops import op_test_utils
 
 # ---------------------------------------------------------------------------
@@ -241,10 +243,6 @@ class TestDepthwiseConv2DWriteOps:
 @pytest.fixture
 def make_depthwise_conv_tflite(tmp_path) -> Callable:
     """Fixture returning a function to create fully quantized INT8 DepthwiseConv2D models."""
-    import keras  # noqa: PLC0415
-    import tensorflow as tf
-
-    from tests.conftest import export_quantized_tflite_model  # noqa: PLC0415
 
     def _make(
         input_shape: tuple[int, int, int] = (8, 8, 3),
@@ -352,12 +350,6 @@ def test__depthwise_conv2d_save_roundtrip(
 
 
 def test__depthwise_conv2d_integration(temp_model_dir, run_interpreter):
-    import keras
-    import numpy as np
-    import tensorflow as tf
-
-    from tests.conftest import export_quantized_tflite_model
-
     tf.random.set_seed(42)
 
     inputs = keras.Input(shape=(8, 8, 3))

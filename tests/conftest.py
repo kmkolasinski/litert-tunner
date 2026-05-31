@@ -323,10 +323,7 @@ def run_interpreter() -> Callable:
         interpreter = Interpreter(model_path=str(model_path))
         input_details = interpreter.get_input_details()
 
-        if not isinstance(input_data, list):
-            input_data_list = [input_data]
-        else:
-            input_data_list = input_data
+        input_data_list = [input_data] if not isinstance(input_data, list) else input_data
 
         for i, in_data in enumerate(input_data_list):
             interpreter.resize_tensor_input(input_details[i]["index"], list(in_data.shape))
