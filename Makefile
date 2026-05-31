@@ -7,16 +7,16 @@ SHELL := /bin/bash
 # Prepend the virtual environment's bin directory to PATH
 export PATH := $(CURDIR)/.venv/bin:$(PATH)
 
-init: venv ## One-time dev setup: installs uv into the venv and pre-commit hooks
+init: venv ## One-time dev setup: installs uv into the venv
 	pip install uv
-	uv run --with pre-commit pre-commit install
-	@echo "Done! Run 'make install' to install project dependencies."
+	@echo "Done! Run 'make install' to install project dependencies and setup pre-commit hooks."
 
 venv: ## Creates a virtual environment
 	python3 -m venv .venv
 
-install: ## Installs the project in editable mode with dev dependencies
+install: ## Installs the project in editable mode with dev dependencies and sets up pre-commit hooks
 	uv pip install -e ".[dev]"
+	pre-commit install
 
 test: ## Runs the tests with coverage and parallel execution
 	python -m pytest -n 4 --forked \

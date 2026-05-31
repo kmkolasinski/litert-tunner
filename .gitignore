@@ -6,6 +6,7 @@ test-results/
 .pytest_cache
 .antigravitycli
 .vscode
+uv.lock
 __pycache__
 *.py[codz]
 *$py.class
