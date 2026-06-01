@@ -154,7 +154,7 @@ class TestSquaredDifferenceWriteOps:
 
 
 def test__squared_difference_integration(temp_model_dir, run_interpreter):
-    tf.random.set_seed(42)
+    keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(4,))
     x = keras.layers.Dense(4)(inputs)
@@ -171,3 +171,5 @@ def test__squared_difference_integration(temp_model_dir, run_interpreter):
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
+
+    op_test_utils.verify_model_contains_operator(output_path, "SQUARED_DIFFERENCE")

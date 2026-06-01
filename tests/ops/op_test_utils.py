@@ -22,6 +22,7 @@ import keras
 import numpy as np
 
 import litert_tunner
+from litert_tunner import flatbuffer
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
 
@@ -369,3 +370,20 @@ def verify_model_outputs(
     else:
         assert isinstance(litert_saved_outputs, np.ndarray), "Expected numpy array from LiteRT"
         np.testing.assert_allclose(keras_outputs, litert_saved_outputs, atol=atol)
+
+
+def verify_model_contains_operator(
+    model_path: pathlib.Path | str,
+    op_type: str,
+) -> None:
+    """Verify that the exported TFLite model contains the specified operator type.
+
+    Args:
+        model_path: Path to the .tflite model file.
+        op_type: The expected operator type string (e.g. "ADD").
+    """
+    graph_def = flatbuffer.parse_tflite(model_path)
+    op_types = {op.op_type for op in graph_def.operators}
+    assert op_type in op_types, (
+        f"Expected operator {op_type!r} not found in model.\nFound operators: {sorted(op_types)}"
+    )

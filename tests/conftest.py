@@ -33,7 +33,7 @@ def make_dense_tflite(temp_model_dir: Path) -> Callable:
         float_io: bool = False,
         seed: int = 42,
     ) -> Path:
-        tf.random.set_seed(seed)
+        keras.utils.set_random_seed(seed)
 
         # Build Keras model
         inputs = keras.Input(shape=(num_features,))
@@ -71,7 +71,7 @@ def make_mlp_tflite(temp_model_dir: Path) -> Callable:
     ) -> Path:
         if hidden_sizes is None:
             hidden_sizes = [1]
-        tf.random.set_seed(seed)
+        keras.utils.set_random_seed(seed)
 
         # Build Keras model
         inputs = keras.Input(shape=(input_size,))
@@ -129,7 +129,7 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
     ) -> Path:
         if filters is None:
             filters = [8, 8]
-        tf.random.set_seed(seed)
+        keras.utils.set_random_seed(seed)
 
         # Build Keras model
         inputs = keras.Input(shape=input_shape)
@@ -242,7 +242,7 @@ def make_backbone_tflite(temp_model_dir: Path) -> Callable:
         seed: int = 42,
         backbone_name: str = "EfficientNetB0",
     ) -> Path:
-        tf.random.set_seed(seed)
+        keras.utils.set_random_seed(seed)
 
         # Build Keras model using selected backbone and custom classification head
         backbone_cls = getattr(keras.applications, backbone_name)

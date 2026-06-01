@@ -3,7 +3,6 @@
 import keras
 import numpy as np
 import pytest
-import tensorflow as tf
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
@@ -239,7 +238,7 @@ class TestMeanWriteOps:
 
 
 def test__mean_integration(temp_model_dir, run_interpreter):
-    tf.random.set_seed(42)
+    keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(8, 8, 3))
     outputs = keras.layers.GlobalAveragePooling2D()(inputs)
@@ -253,3 +252,5 @@ def test__mean_integration(temp_model_dir, run_interpreter):
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
+
+    op_test_utils.verify_model_contains_operator(output_path, "MEAN")
