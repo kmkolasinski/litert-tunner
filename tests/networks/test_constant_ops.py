@@ -7,7 +7,7 @@ import keras
 import numpy as np
 
 import litert_tunner
-from tests import conftest
+from tests import conftest, testing_utils
 
 
 def test__mul_with_constant_input(temp_model_dir: Path, run_interpreter: Callable):
@@ -26,6 +26,7 @@ def test__mul_with_constant_input(temp_model_dir: Path, run_interpreter: Callabl
 
     keras_model = litert_tunner.load_model(str(model_path))
     keras_outputs = keras_model.predict(x_test)
+    testing_utils.assert_cosine_similarity(keras_outputs, litert_outputs)
     np.testing.assert_allclose(litert_outputs, keras_outputs, atol=1e-3)
 
 
@@ -45,4 +46,5 @@ def test__add_with_constant_input(temp_model_dir: Path, run_interpreter: Callabl
 
     keras_model = litert_tunner.load_model(str(model_path))
     keras_outputs = keras_model.predict(x_test)
+    testing_utils.assert_cosine_similarity(keras_outputs, litert_outputs)
     np.testing.assert_allclose(litert_outputs, keras_outputs, atol=1e-3)

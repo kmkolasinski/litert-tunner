@@ -292,7 +292,7 @@ def export_quantized_tflite_model(
         # Get shape from model input shape, replacing None or dynamic dimensions with 1
         rep_shape = [1 if d is None else d for d in model.input_shape]
         rng = np.random.default_rng(42)
-        for _ in range(100):
+        for _ in range(10):
             # Generates values within [-1.0, 1.0]
             yield [rng.uniform(-1.0, 1.0, rep_shape).astype(np.float32)]
 

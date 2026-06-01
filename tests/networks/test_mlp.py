@@ -3,6 +3,7 @@ from collections.abc import Callable
 import numpy as np
 
 import litert_tunner
+from tests import testing_utils
 
 
 def test__mlp_single_layer_forward(make_mlp_tflite: Callable, run_interpreter: Callable):
@@ -21,12 +22,16 @@ def test__mlp_single_layer_forward(make_mlp_tflite: Callable, run_interpreter: C
     # compare original LiteRT model with keras parsed
     keras_model = litert_tunner.load_model(str(model_path))
     keras_outputs = keras_model.predict(x_train)
-    np.testing.assert_allclose(litert_outputs, keras_outputs, atol=1e-3)
+    testing_utils.assert_cosine_similarity(keras_outputs, litert_outputs)
+
+    # outputs are normalized to -1, 1
+    max_value = np.abs(litert_outputs).max()
+    np.testing.assert_allclose(litert_outputs / max_value, keras_outputs / max_value, atol=0.0001)
 
     # save the model and make sure the outputs are still the same
     litert_tunner.save_model(keras_model, str(model_path))
     litert_saved_outputs = run_interpreter(model_path, x_train)
-    np.testing.assert_allclose(keras_outputs, litert_saved_outputs, atol=1e-3)
+    np.testing.assert_allclose(litert_outputs, litert_saved_outputs, atol=1e-5)
 
 
 def test__mlp_multiple_layers_forward(make_mlp_tflite: Callable, run_interpreter: Callable):
@@ -45,12 +50,16 @@ def test__mlp_multiple_layers_forward(make_mlp_tflite: Callable, run_interpreter
     # compare original LiteRT model with keras parsed
     keras_model = litert_tunner.load_model(str(model_path))
     keras_outputs = keras_model.predict(x_train)
-    np.testing.assert_allclose(litert_outputs, keras_outputs, atol=1e-3)
+    testing_utils.assert_cosine_similarity(keras_outputs, litert_outputs)
+
+    # outputs are normalized to -1, 1
+    max_value = np.abs(litert_outputs).max()
+    np.testing.assert_allclose(litert_outputs / max_value, keras_outputs / max_value, atol=0.0001)
 
     # save the model and make sure the outputs are still the same
     litert_tunner.save_model(keras_model, str(model_path))
     litert_saved_outputs = run_interpreter(model_path, x_train)
-    np.testing.assert_allclose(keras_outputs, litert_saved_outputs, atol=1e-3)
+    np.testing.assert_allclose(litert_outputs, litert_saved_outputs, atol=1e-5)
 
 
 def test__mlp_multiple_layers_batchnorm_forward(
@@ -73,12 +82,16 @@ def test__mlp_multiple_layers_batchnorm_forward(
     # compare original LiteRT model with keras parsed
     keras_model = litert_tunner.load_model(str(model_path))
     keras_outputs = keras_model.predict(x_train)
-    np.testing.assert_allclose(litert_outputs, keras_outputs, atol=1e-3)
+    testing_utils.assert_cosine_similarity(keras_outputs, litert_outputs)
+
+    # outputs are normalized to -1, 1
+    max_value = np.abs(litert_outputs).max()
+    np.testing.assert_allclose(litert_outputs / max_value, keras_outputs / max_value, atol=0.0001)
 
     # save the model and make sure the outputs are still the same
     litert_tunner.save_model(keras_model, str(model_path))
     litert_saved_outputs = run_interpreter(model_path, x_train)
-    np.testing.assert_allclose(keras_outputs, litert_saved_outputs, atol=1e-3)
+    np.testing.assert_allclose(litert_outputs, litert_saved_outputs, atol=1e-5)
 
 
 def test__mlp_multiple_layers_with_skip_connections_forward(
@@ -100,9 +113,13 @@ def test__mlp_multiple_layers_with_skip_connections_forward(
     # compare original LiteRT model with keras parsed
     keras_model = litert_tunner.load_model(str(model_path))
     keras_outputs = keras_model.predict(x_train)
-    np.testing.assert_allclose(litert_outputs, keras_outputs, atol=1e-3)
+    testing_utils.assert_cosine_similarity(keras_outputs, litert_outputs)
+
+    # outputs are normalized to -1, 1
+    max_value = np.abs(litert_outputs).max()
+    np.testing.assert_allclose(litert_outputs / max_value, keras_outputs / max_value, atol=0.0001)
 
     # save the model and make sure the outputs are still the same
     litert_tunner.save_model(keras_model, str(model_path))
     litert_saved_outputs = run_interpreter(model_path, x_train)
-    np.testing.assert_allclose(keras_outputs, litert_saved_outputs, atol=1e-3)
+    np.testing.assert_allclose(litert_outputs, litert_saved_outputs, atol=1e-5)

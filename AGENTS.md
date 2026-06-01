@@ -12,52 +12,6 @@ simulation, fine-tune the float32 parameters (biases, scales, zero-points), and
 write the updated parameters back into the flatbuffer — without altering the
 graph topology.
 
-## 2. User Flow
-
-```text
-┌─────────────────────────────────────┐
-│  1. Train a Keras model normally    │
-│  2. Export to LiteRT INT8 format    │
-│     (full integer quantization)     │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│  3. litert_tunner.load_model(path)  │
-│     - Parse flatbuffer graph        │
-│     - Reconstruct as Keras model    │
-│       with fake-quantization nodes  │
-│     - INT8 weights, float32 biases, │
-│       scales, and zero-points       │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│  4. tunner_model.predict(inputs)    │
-│     Must exactly match the LiteRT   │
-│     Interpreter output (within      │
-│     numerical noise)                │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│  5. tunner_model.fit(...)           │
-│     Fine-tune biases, scales, etc.  │
-│     Gradients flow through float32  │
-│     parameters only; INT8 weights   │
-│     are frozen (configurable)       │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│  6. litert_tunner.save_model(       │
-│        tunner_model, path)          │
-│     Update flatbuffer with new      │
-│     parameter values — graph        │
-│     topology must remain identical  │
-└─────────────────────────────────────┘
-```
-
 ## 3. Target API
 
 ```python
@@ -144,37 +98,6 @@ accumulation and before requantization.
 Uses the **`tflite` PyPI package** with the Object API (`Model`) for
 programmatic parse → modify → re-serialize, entirely in Python.
 
-### 4.5 Supported Operations
-
-Currently implemented operations (one file per op in `src/litert_tunner/ops/`):
-
-| Op file               | TFLite op type(s)                | Writable | Notes                           |
-| --------------------- | -------------------------------- | -------- | ------------------------------- |
-| `dense.py`            | `FULLY_CONNECTED`                | ✅       | Per-tensor weight quant         |
-| `conv2d.py`           | `CONV_2D`                        | ✅       | Per-channel weight quant        |
-| `depthwise_conv2d.py` | `DEPTHWISE_CONV_2D`              | ✅       | Per-channel weight quant        |
-| `add.py`              | `ADD`                            | ✅       | Requantizes both inputs         |
-| `mul.py`              | `MUL`                            | ✅       | Requantizes both inputs         |
-| `logistic.py`         | `LOGISTIC`                       | ✅       | Sigmoid activation              |
-| `mean.py`             | `MEAN`                           | ✅       | Reduce mean                     |
-| `quantize_op.py`      | `QUANTIZE`, `DEQUANTIZE`         | ✅       | Quantize/dequantize passthrough |
-| `pool.py`             | `MAX_POOL_2D`, `AVERAGE_POOL_2D` | ❌       | No trainable params             |
-| `reshape.py`          | `RESHAPE`                        | ❌       | Static or dynamic shape         |
-| `pack.py`             | `PACK`                           | ❌       | Constant tensor packing         |
-| `shape_op.py`         | `SHAPE`                          | ❌       | Returns tensor shape            |
-| `strided_slice.py`    | `STRIDED_SLICE`                  | ❌       | Tensor slicing                  |
-
-**Adding a new op:**
-
-1. Create `src/litert_tunner/ops/<op_name>.py` with a `keras.Layer` subclass.
-1. Decorate the builder function with `@registry.register_op("OP_TYPE")`.
-1. Add the import to `src/litert_tunner/ops/__init__.py`.
-1. Write tests in `tests/ops/test_<op_name>.py`.
-
-Ops that persist parameters must implement the `Writable` protocol (see
-`graph/types.py`) and its `collect_write_ops()` method. Passthrough ops
-(reshape, pooling, etc.) do not implement `Writable`.
-
 ### 4.6 Op Implementation Pattern
 
 Each quantized op follows the same pattern:
@@ -227,18 +150,7 @@ src/litert_tunner/
     ├── registry.py           # @register_op decorator, get_op_builder()
     ├── utils.py              # Shared helpers: STE quant/dequant, fused activation, etc.
     ├── dense.py              # FULLY_CONNECTED
-    ├── conv2d.py             # CONV_2D
-    ├── depthwise_conv2d.py   # DEPTHWISE_CONV_2D
-    ├── add.py                # ADD
-    ├── mul.py                # MUL
-    ├── logistic.py           # LOGISTIC
-    ├── mean.py               # MEAN
-    ├── quantize_op.py        # QUANTIZE, DEQUANTIZE
-    ├── pool.py               # MAX_POOL_2D, AVERAGE_POOL_2D
-    ├── reshape.py            # RESHAPE
-    ├── pack.py               # PACK
-    ├── shape_op.py           # SHAPE
-    └── strided_slice.py      # STRIDED_SLICE
+    ...  # MORE OPS
 ```
 
 ```text
@@ -256,30 +168,13 @@ tests/
 │   ├── op_test_utils.py     # Test helpers: make_tensor, build_and_call, assertions
 │   ├── test_utils.py        # Tests for ops/utils.py helpers
 │   ├── test_dense.py        # FullyConnected unit tests
-│   ├── test_conv2d.py       # Conv2D unit tests
-│   ├── test_depthwise_conv2d.py  # DepthwiseConv2D unit tests
-│   ├── test_add.py          # Add unit tests
-│   ├── test_mul.py          # Mul unit tests
-│   ├── test_logistic.py     # Logistic unit tests
-│   ├── test_mean.py         # Mean unit tests
-│   ├── test_pool.py         # Pool unit tests
-│   ├── test_quantize_op.py  # Quantize/Dequantize unit tests
-│   └── test_passthrough_ops.py  # Reshape, Pack, Shape, StridedSlice tests
+│   # MORE OPS TESTS
 └── networks/
     ├── test_mlp.py          # Multi-layer MLP forward-pass tests
-    ├── test_resnet.py       # ResNet-like CNN forward-pass tests
-    └── test_efficientnet.py # EfficientNetB0 forward-pass test
+    # MORE NETWORKS TESTS
 ```
 
 ### Design Principles
-
-- **Modular**: Each op is a self-contained module. Adding a new op requires
-  only: create the file, decorate with `@register_op`, add import to
-  `ops/__init__.py`.
-- **Composable**: The graph builder composes Keras layers from the op registry.
-  Operations are independent building blocks.
-- **Clean separation of concerns**: Flatbuffer I/O knows nothing about Keras.
-  The graph builder knows nothing about flatbuffers.
 
 ## 6. Coding Standards
 
@@ -495,18 +390,11 @@ Key points:
 # Activate the virtual environment
 source .venv/bin/activate
 
-# Run all tests with coverage (via Makefile)
-make test
-
 # Run a specific test file
 .venv/bin/python -m pytest tests/ops/test_dense.py -v
 
-# Run a specific test directory
-.venv/bin/python -m pytest tests/networks/ -v
-
 # Run linting
-ruff check src/ tests/
-ruff format --check src/ tests/
+make precommit
 ```
 
 ## 8. Agent Workflow Checklist
