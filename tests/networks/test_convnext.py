@@ -44,7 +44,7 @@ def test__make_convnext_tiny_tflite_creates_valid_model(
         litert_outputs / max_value,
         keras_outputs / max_value,
         atol=0.01,
-        max_mismatch_fraction=0.005,
+        max_mismatch_fraction=0.001,
     )
 
     # Save the model and make sure the outputs are still the same
