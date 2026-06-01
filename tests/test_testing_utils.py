@@ -52,3 +52,33 @@ def test__assert_cosine_similarity_handles_multidimensional_arrays() -> None:
 
     # Identical multidimensional arrays should pass
     testing_utils.assert_cosine_similarity(y, y)
+
+
+def test__assert_allclose_with_mismatch_tolerance_succeeds_for_identical_inputs() -> None:
+    """Verify that identical inputs pass the tolerance check."""
+    a = np.array([1.0, 2.0, 3.0])
+    testing_utils.assert_allclose_with_mismatch_tolerance(a, a)
+
+
+def test__assert_allclose_with_mismatch_tolerance_succeeds_within_mismatch_fraction() -> None:
+    """Verify that inputs pass if mismatch fraction is within allowed limit."""
+    a = np.array([1.0, 2.0, 3.0, 4.0])
+    # One element differs by more than atol (0.1 difference on a 4-element array = 25% mismatch)
+    b = np.array([1.0, 2.0, 3.1, 4.0])
+
+    # max_mismatch_fraction=0.3 allows up to 30% mismatch, so 25% should pass
+    testing_utils.assert_allclose_with_mismatch_tolerance(
+        a, b, atol=0.01, max_mismatch_fraction=0.30
+    )
+
+
+def test__assert_allclose_with_mismatch_tolerance_fails_exceeding_mismatch_fraction() -> None:
+    """Verify that inputs fail if mismatch fraction exceeds allowed limit."""
+    a = np.array([1.0, 2.0, 3.0, 4.0])
+    b = np.array([1.0, 2.0, 3.1, 4.0])
+
+    # max_mismatch_fraction=0.2 allows up to 20% mismatch, so 25% should fail
+    with pytest.raises(AssertionError, match="Mismatched elements: 1 / 4"):
+        testing_utils.assert_allclose_with_mismatch_tolerance(
+            a, b, atol=0.01, max_mismatch_fraction=0.20
+        )

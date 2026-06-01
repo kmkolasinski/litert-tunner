@@ -23,7 +23,7 @@ def test__make_convnext_tiny_tflite_creates_valid_model(
     model_path = make_backbone_tflite(
         input_shape=input_shape,
         weights=None,
-        num_outputs=100,
+        num_outputs=1000,
         float_io=True,
         backbone_name="ConvNeXtTiny",
     )
@@ -40,7 +40,12 @@ def test__make_convnext_tiny_tflite_creates_valid_model(
 
     # outputs are normalized to -1, 1, this is a big model so the errors are bigger
     max_value = np.abs(litert_outputs).max()
-    np.testing.assert_allclose(litert_outputs / max_value, keras_outputs / max_value, atol=0.025)
+    testing_utils.assert_allclose_with_mismatch_tolerance(
+        litert_outputs / max_value,
+        keras_outputs / max_value,
+        atol=0.01,
+        max_mismatch_fraction=0.005,
+    )
 
     # Save the model and make sure the outputs are still the same
     litert_tunner.save_model(keras_model, str(model_path))
