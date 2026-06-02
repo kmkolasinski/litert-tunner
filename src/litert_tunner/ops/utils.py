@@ -357,7 +357,7 @@ class QuantizationVars:
             name=name_zp,
             shape=np.shape(zero_point),
             initializer=keras.initializers.Constant(typing.cast("float", zero_point)),
-            trainable=trainable,
+            trainable=False,
         )
 
     def dequantize(self, x: TensorLike) -> TensorLike:

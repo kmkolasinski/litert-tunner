@@ -81,7 +81,7 @@ class TestSubTrainableWeights:
         op, tensors = sub_setup
         inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
-        op_test_utils.assert_trainable_weight_names(layer, {"output_scale", "output_zero_point"})
+        op_test_utils.assert_trainable_weight_names(layer, set())
 
     def test__non_trainable_weights(self, sub_setup):
         op, tensors = sub_setup
@@ -94,6 +94,8 @@ class TestSubTrainableWeights:
                 "input1_zero_point",
                 "input2_scale",
                 "input2_zero_point",
+                "output_scale",
+                "output_zero_point",
             },
         )
 

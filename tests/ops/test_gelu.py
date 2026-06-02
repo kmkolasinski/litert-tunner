@@ -87,10 +87,7 @@ class TestGeluTrainableWeights:
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
         op_test_utils.assert_trainable_weight_names(
             layer,
-            {
-                "output_scale",
-                "output_zero_point",
-            },
+            set(),
         )
 
     def test__non_trainable_weights(
@@ -100,11 +97,7 @@ class TestGeluTrainableWeights:
         inputs = np.zeros((1, 4), dtype=np.float32)
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
         op_test_utils.assert_non_trainable_weight_names(
-            layer,
-            {
-                "input_scale",
-                "input_zero_point",
-            },
+            layer, {"input_scale", "input_zero_point", "output_scale", "output_zero_point"}
         )
 
 

@@ -185,7 +185,7 @@ class TestMeanTrainableWeights:
         layer, _ = op_test_utils.build_and_call(
             op, tensors, np.zeros((1, 4, 4, 3), dtype=np.float32)
         )
-        op_test_utils.assert_trainable_weight_names(layer, {"output_scale", "output_zero_point"})
+        op_test_utils.assert_trainable_weight_names(layer, set())
 
     def test__non_trainable_weights(self, mean_setup):
         """MEAN layer must have frozen input_scale, input_zero_point."""
@@ -193,7 +193,9 @@ class TestMeanTrainableWeights:
         layer, _ = op_test_utils.build_and_call(
             op, tensors, np.zeros((1, 4, 4, 3), dtype=np.float32)
         )
-        op_test_utils.assert_non_trainable_weight_names(layer, {"input_scale", "input_zero_point"})
+        op_test_utils.assert_non_trainable_weight_names(
+            layer, {"input_scale", "input_zero_point", "output_scale", "output_zero_point"}
+        )
 
 
 # ===================================================================

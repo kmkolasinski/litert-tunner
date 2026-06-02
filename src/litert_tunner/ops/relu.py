@@ -54,7 +54,7 @@ class QuantizedRelu(keras.Layer, types.Writable):
             "output",
             self._output_scale,
             self._output_zero_point,
-            trainable=True,
+            trainable=False,
         )
         super().build(input_shape)
 

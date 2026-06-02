@@ -103,7 +103,7 @@ class TestConcatenationTrainableWeights:
         op, tensors = concat_setup
         inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 3), dtype=np.float32)]
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
-        op_test_utils.assert_trainable_weight_names(layer, {"output_scale", "output_zero_point"})
+        op_test_utils.assert_trainable_weight_names(layer, set())
 
     def test__non_trainable_weights(self, concat_setup):
         op, tensors = concat_setup
@@ -116,6 +116,8 @@ class TestConcatenationTrainableWeights:
                 "input0_zero_point",
                 "input1_scale",
                 "input1_zero_point",
+                "output_scale",
+                "output_zero_point",
             },
         )
 

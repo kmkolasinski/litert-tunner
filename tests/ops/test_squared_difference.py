@@ -96,10 +96,7 @@ class TestSquaredDifferenceTrainableWeights:
         layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
         op_test_utils.assert_trainable_weight_names(
             layer,
-            {
-                "output_scale",
-                "output_zero_point",
-            },
+            set(),
         )
 
     def test__non_trainable_weights(
@@ -115,6 +112,8 @@ class TestSquaredDifferenceTrainableWeights:
                 "input1_zero_point",
                 "input2_scale",
                 "input2_zero_point",
+                "output_scale",
+                "output_zero_point",
             },
         )
 

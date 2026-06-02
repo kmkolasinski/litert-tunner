@@ -172,13 +172,13 @@ class TestQuantizeTrainableWeights:
         """QUANTIZE layer must have trainable scale and zero_point."""
         op, tensors = quantize_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
-        op_test_utils.assert_trainable_weight_names(layer, {"scale", "zero_point"})
+        op_test_utils.assert_trainable_weight_names(layer, set())
 
     def test__no_non_trainable_weights(self, quantize_setup):
         """QUANTIZE layer must have no non-trainable weights."""
         op, tensors = quantize_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
-        op_test_utils.assert_non_trainable_weight_names(layer, set())
+        op_test_utils.assert_non_trainable_weight_names(layer, {"scale", "zero_point"})
 
 
 class TestQuantizeWriteOps:

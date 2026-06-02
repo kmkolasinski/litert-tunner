@@ -12,7 +12,7 @@ simulation, fine-tune the float32 parameters (biases, scales, zero-points), and
 write the updated parameters back into the flatbuffer — without altering the
 graph topology.
 
-## 3. Target API
+## 2. Target API
 
 ```python
 import litert_tunner
@@ -31,9 +31,9 @@ tunner_model.fit(train_ds, validation_data=val_ds, epochs=5)
 litert_tunner.save_model(tunner_model, "model_int8_finetuned.tflite")
 ```
 
-## 4. Technical Details
+## 3. Technical Details
 
-### 4.1 Quantization Representation
+### 3.1 Quantization Representation
 
 | Component   | LiteRT storage | Tunner Keras representation | Trainable by default |
 | ----------- | -------------- | --------------------------- | -------------------- |

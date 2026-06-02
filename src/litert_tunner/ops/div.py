@@ -82,14 +82,14 @@ class QuantizedDiv(keras.Layer, types.Writable):
         else:
             self.input2_quant = None
 
-        # Output quantization params (trainable when present)
+        # Output quantization params (frozen when present)
         if self._output_scale is not None and self._output_zero_point is not None:
             self.output_quant = utils.QuantizationVars(
                 self,
                 "output",
                 self._output_scale,
                 self._output_zero_point,
-                trainable=True,
+                trainable=False,
             )
         else:
             self.output_quant = None

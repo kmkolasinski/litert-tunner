@@ -114,7 +114,7 @@ class Quantize(keras.Layer, types.Writable):
         scale: float,
         zero_point: float,
         *,
-        trainable: bool = True,
+        trainable: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -196,7 +196,7 @@ def build_quantize(
     return Quantize(
         scale=scale,
         zero_point=zero_point,
-        trainable=True,
+        trainable=False,
         name=f"quantize_{op.output_indices[0]}",
     )
 

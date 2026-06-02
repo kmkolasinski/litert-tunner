@@ -102,22 +102,22 @@ class QuantizedDense(keras.Layer, types.Writable):
             trainable=False,
         )
 
-        # Weight quantization params (frozen)
+        # Weight quantization params (trainable scale, frozen zero-point)
         self.weight_quant = utils.QuantizationVars(
             self,
             "weight",
             self._weight_scale,
             self._weight_zero_point,
-            trainable=False,
+            trainable=True,
         )
 
-        # Output quantization params (trainable)
+        # Output quantization params (frozen)
         self.output_quant = utils.QuantizationVars(
             self,
             "output",
             self._output_scale,
             self._output_zero_point,
-            trainable=True,
+            trainable=False,
         )
 
         super().build(input_shape)

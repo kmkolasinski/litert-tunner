@@ -72,7 +72,7 @@ class QuantizedSquaredDifference(keras.Layer, types.Writable):
             "output",
             self._output_scale,
             self._output_zero_point,
-            trainable=True,
+            trainable=False,
         )
 
         # Constant input (frozen), stored as simulated INT8 float32

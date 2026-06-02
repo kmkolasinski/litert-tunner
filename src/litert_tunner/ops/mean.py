@@ -72,13 +72,13 @@ class QuantizedMean(keras.Layer, types.Writable):
             trainable=False,
         )
 
-        # Output quantization params (trainable)
+        # Output quantization params (frozen)
         self.output_quant = utils.QuantizationVars(
             self,
             "output",
             self._output_scale,
             self._output_zero_point,
-            trainable=True,
+            trainable=False,
         )
 
         super().build(input_shape)
