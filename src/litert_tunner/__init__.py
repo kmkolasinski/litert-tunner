@@ -2,7 +2,11 @@
 
 import keras
 
-from litert_tunner import flatbuffer, graph, logging, ops
+from litert_tunner import flatbuffer, graph
+from litert_tunner.testing_utils import (
+    assert_allclose_with_mismatch_tolerance,
+    assert_cosine_similarity,
+)
 from litert_tunner.trainer import Trainer, prepare_for_finetuning
 
 __version__ = "0.1.0"
@@ -33,11 +37,9 @@ def save_model(model: keras.Model, path: str) -> None:
 
 __all__ = [
     "Trainer",
-    "flatbuffer",
-    "graph",
+    "assert_allclose_with_mismatch_tolerance",
+    "assert_cosine_similarity",
     "load_model",
-    "logging",
-    "ops",
     "prepare_for_finetuning",
     "save_model",
 ]

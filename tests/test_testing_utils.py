@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tests import testing_utils
+from litert_tunner import testing_utils
 
 
 def test__assert_cosine_similarity_succeeds_for_identical_inputs() -> None:

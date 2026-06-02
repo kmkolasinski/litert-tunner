@@ -1,4 +1,4 @@
-"""Utility functions for tests."""
+"""Utility functions for testing models."""
 
 from __future__ import annotations
 

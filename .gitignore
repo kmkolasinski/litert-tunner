@@ -2,7 +2,7 @@
 notebooks/
 test-results/
 .venv
-test_yolo.py
+tests/experimental/*
 .ruff_cache
 .pytest_cache
 .antigravitycli

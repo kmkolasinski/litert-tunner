@@ -14,6 +14,9 @@ init: venv ## One-time dev setup: installs uv into the venv
 venv: ## Creates a virtual environment
 	python3 -m venv .venv
 
+activate: ## Activates the virtual environment
+	source .venv/bin/activate
+
 install: ## Installs the project in editable mode with dev dependencies and sets up pre-commit hooks
 	uv pip install -e ".[dev]"
 	pre-commit install

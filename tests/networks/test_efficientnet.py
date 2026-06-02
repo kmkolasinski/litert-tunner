@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 import litert_tunner
-from tests import testing_utils
+from litert_tunner import testing_utils
 
 if TYPE_CHECKING:
     from collections.abc import Callable

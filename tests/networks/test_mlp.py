@@ -3,7 +3,7 @@ from collections.abc import Callable
 import numpy as np
 
 import litert_tunner
-from tests import testing_utils
+from litert_tunner import testing_utils
 
 
 def test__mlp_single_layer_forward(make_mlp_tflite: Callable, run_interpreter: Callable):

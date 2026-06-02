@@ -7,7 +7,8 @@ import keras
 import numpy as np
 
 import litert_tunner
-from tests import conftest, testing_utils
+from litert_tunner import testing_utils
+from tests import conftest
 
 
 def test__mul_with_constant_input(temp_model_dir: Path, run_interpreter: Callable):
