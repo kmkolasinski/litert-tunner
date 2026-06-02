@@ -93,14 +93,12 @@ class QuantizedResizeNearestNeighbor(keras.Layer):
     def get_config(self):
         """Return the configuration dictionary for serialization."""
         config = super().get_config()
-        config.update(
-            {
-                "target_height": self._target_height,
-                "target_width": self._target_width,
-                "align_corners": self._align_corners,
-                "half_pixel_centers": self._half_pixel_centers,
-            }
-        )
+        config.update({
+            "target_height": self._target_height,
+            "target_width": self._target_width,
+            "align_corners": self._align_corners,
+            "half_pixel_centers": self._half_pixel_centers,
+        })
         return config
 
 

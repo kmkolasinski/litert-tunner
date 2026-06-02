@@ -74,14 +74,12 @@ class QuantizedMaxPool2D(keras.Layer):
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
-        config.update(
-            {
-                "pool_size": self._pool_size,
-                "strides": self._strides,
-                "padding": self._padding,
-                "fused_activation": self._fused_activation,
-            }
-        )
+        config.update({
+            "pool_size": self._pool_size,
+            "strides": self._strides,
+            "padding": self._padding,
+            "fused_activation": self._fused_activation,
+        })
         return config
 
 

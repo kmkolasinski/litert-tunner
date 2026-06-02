@@ -104,16 +104,14 @@ class QuantizedMean(keras.Layer, types.Writable):
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
-        config.update(
-            {
-                "axis": self._axis,
-                "keep_dims": self._keep_dims,
-                "input_scale": self._input_scale,
-                "input_zero_point": self._input_zero_point,
-                "output_scale": self._output_scale,
-                "output_zero_point": self._output_zero_point,
-            }
-        )
+        config.update({
+            "axis": self._axis,
+            "keep_dims": self._keep_dims,
+            "input_scale": self._input_scale,
+            "input_zero_point": self._input_zero_point,
+            "output_scale": self._output_scale,
+            "output_zero_point": self._output_zero_point,
+        })
         return config
 
     def collect_write_ops(

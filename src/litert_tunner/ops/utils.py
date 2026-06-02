@@ -323,9 +323,10 @@ def extract_constant_input(
         A tuple of (quantized_constant_data, constant_index). If neither input
         is constant, returns (None, -1).
     """
-    for idx, (tensor, _quant) in enumerate(
-        [(input1_tensor, input1_quant), (input2_tensor, input2_quant)]
-    ):
+    for idx, (tensor, _quant) in enumerate([
+        (input1_tensor, input1_quant),
+        (input2_tensor, input2_quant),
+    ]):
         if tensor.data is not None:
             # Constant tensor data is already stored as INT8 in the flatbuffer.
             # Store it as float32 for computation (simulated INT8 values).

@@ -76,6 +76,7 @@ exclude = [
 fix = true
 
 [tool.ruff.format]
+preview = true
 # Like Black, use double quotes for strings.
 quote-style = "double"
 

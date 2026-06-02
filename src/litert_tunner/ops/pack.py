@@ -92,13 +92,11 @@ class QuantizedPack(keras.Layer):
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
-        config.update(
-            {
-                "axis": self._axis,
-                "values_count": self._values_count,
-                "constant_map": self._constant_map,
-            }
-        )
+        config.update({
+            "axis": self._axis,
+            "values_count": self._values_count,
+            "constant_map": self._constant_map,
+        })
         return config
 
 

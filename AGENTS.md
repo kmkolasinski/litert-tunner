@@ -1,6 +1,6 @@
 # AGENTS.md — Guidelines for AI Agents Working on `litert-tunner`
 
-## 1. Project Vision
+## Project Vision
 
 **litert-tunner** is a Python library that lets users fine-tune fully-quantized
 INT8 LiteRT (TFLite) models *after* export.
@@ -12,7 +12,7 @@ simulation, fine-tune the float32 parameters (biases, scales, zero-points), and
 write the updated parameters back into the flatbuffer — without altering the
 graph topology.
 
-## 2. Target API
+## Target API
 
 ```python
 import litert_tunner
@@ -31,24 +31,18 @@ tunner_model.fit(train_ds, validation_data=val_ds, epochs=5)
 litert_tunner.save_model(tunner_model, "model_int8_finetuned.tflite")
 ```
 
-## 3. Technical Details
+## Technical Details
 
-### 3.1 Quantization Representation
+Quantization Representation
 
 | Component   | LiteRT storage | Tunner Keras representation | Trainable by default |
 | ----------- | -------------- | --------------------------- | -------------------- |
-| Weights     | INT8           | INT8 (stored as-is)         | No                   |
+| Weights     | INT8           | INT8 (stored as-is)         | Yes                  |
 | Biases      | INT32          | Float32                     | Yes                  |
-| Scales      | Float32        | Float32                     | Yes                  |
-| Zero-points | INT8/INT32     | Float32                     | Yes (configurable)   |
+| Scales      | Float32        | Float32                     | No                   |
+| Zero-points | INT8/INT32     | Float32                     | No                   |
 
-- **Fake quantization nodes** simulate quantize → dequantize round-trips so
-  forward pass matches the integer arithmetic of the real graph.
-- **Gradients** flow through float32 parameters only. Straight-Through
-  Estimator (STE) is used for rounding and clipping operations (see
-  `ops/utils.py`: `quantize_ste`, `dequantize_ste`).
-
-### 4.2 Quantization Formulas
+### Quantization Formulas
 
 All fake-quant simulation is based on the standard TFLite affine quantization
 scheme. Agents implementing ops must use these formulas exactly.
@@ -65,15 +59,7 @@ real_value = scale * (int8_value - zero_point)
 int8_value = clamp(round(real_value / scale) + zero_point, -128, 127)
 ```
 
-**Per-channel vs per-tensor quantization:**
-
-- **Activations**: Always per-tensor (one scale, one zero-point per tensor).
-- **Weights**: Per-channel for Conv2D/DepthwiseConv2D (one scale per output
-  channel), per-tensor for Dense/FullyConnected.
-- **Biases**: Per-channel when weights are per-channel. Bias scale =
-  `input_scale * weight_scale[channel]`. Bias zero-point is always 0.
-
-### 4.3 Fused Activations
+### Fused Activations
 
 TFLite commonly fuses activations into the preceding op (e.g., `Conv2D+ReLU`
 is a single op with `fused_activation_function=RELU`). Supported fused
@@ -87,7 +73,7 @@ activations are defined in `ops/utils.py` as constants:
 The `apply_fused_activation()` helper applies the activation after the
 accumulation and before requantization.
 
-### 4.4 Flatbuffer Handling
+### Flatbuffer Handling
 
 - **Load**: Parse the `.tflite` flatbuffer, extract graph topology, tensor
   metadata (shapes, types, quantization params), and buffer data.
@@ -98,15 +84,14 @@ accumulation and before requantization.
 Uses the **`tflite` PyPI package** with the Object API (`Model`) for
 programmatic parse → modify → re-serialize, entirely in Python.
 
-### 4.6 Op Implementation Pattern
+### Op Implementation Pattern
 
 Each quantized op follows the same pattern:
 
 1. **Keras Layer class** (`QuantizedDense`, `QuantizedConv2D`, etc.):
 
    - `__init__`: Stores raw numpy data for weights, bias, and quant params.
-   - `build`: Creates Keras weights via `self.add_weight(...)` — frozen for
-     INT8 data, trainable for bias/scales/zero-points.
+   - `build`: Creates Keras weights via `self.add_weight(...)`
    - `call`: Dequantize inputs → compute in float32 → apply fused activation
      → quantize output (using STE for gradient flow).
    - `collect_write_ops`: Returns `BufferWriteOp` and `QuantizationWriteOp`
@@ -119,7 +104,7 @@ Each quantized op follows the same pattern:
      `get_quant_param_value`, `apply_fused_activation`).
    - Returns a configured layer instance.
 
-### 4.7 Shared Utilities (`ops/utils.py`)
+### Shared Utilities (`ops/utils.py`)
 
 Key functions used across all op implementations:
 
@@ -132,7 +117,7 @@ Key functions used across all op implementations:
 - `make_quant_write_op` / `to_float_list` / `to_int_list` — Write-op helpers
 - `compute_requantize_multiplier` — `(input_scale * weight_scale) / output_scale`
 
-## 5. Architecture & Code Organization
+## Architecture & Code Organization
 
 ```text
 src/litert_tunner/
@@ -174,7 +159,7 @@ tests/
     # MORE NETWORKS TESTS
 ```
 
-### Design Principles
+## Design Principles
 
 ## 6. Coding Standards
 

@@ -116,16 +116,14 @@ class QuantizedConcatenation(keras.Layer, types.Writable):
     def get_config(self):
         """Return the configuration dictionary for serialization."""
         config = super().get_config()
-        config.update(
-            {
-                "input_scales": self._input_scales,
-                "input_zero_points": self._input_zero_points,
-                "output_scale": self._output_scale,
-                "output_zero_point": self._output_zero_point,
-                "axis": self._axis,
-                "fused_activation": self._fused_activation,
-            }
-        )
+        config.update({
+            "input_scales": self._input_scales,
+            "input_zero_points": self._input_zero_points,
+            "output_scale": self._output_scale,
+            "output_zero_point": self._output_zero_point,
+            "axis": self._axis,
+            "fused_activation": self._fused_activation,
+        })
         return config
 
     def collect_write_ops(

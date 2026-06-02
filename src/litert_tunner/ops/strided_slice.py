@@ -118,18 +118,16 @@ class QuantizedStridedSlice(keras.Layer):
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
-        config.update(
-            {
-                "begin": self._begin,
-                "end": self._end,
-                "strides": self._strides,
-                "begin_mask": self._begin_mask,
-                "end_mask": self._end_mask,
-                "ellipsis_mask": self._ellipsis_mask,
-                "new_axis_mask": self._new_axis_mask,
-                "shrink_axis_mask": self._shrink_axis_mask,
-            }
-        )
+        config.update({
+            "begin": self._begin,
+            "end": self._end,
+            "strides": self._strides,
+            "begin_mask": self._begin_mask,
+            "end_mask": self._end_mask,
+            "ellipsis_mask": self._ellipsis_mask,
+            "new_axis_mask": self._new_axis_mask,
+            "shrink_axis_mask": self._shrink_axis_mask,
+        })
         return config
 
 

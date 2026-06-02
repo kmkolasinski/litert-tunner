@@ -64,13 +64,11 @@ class Dequantize(keras.Layer, types.Writable):
     def get_config(self) -> dict[str, typing.Any]:
         """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
-        config.update(
-            {
-                "scale": self._initial_scale,
-                "zero_point": self._initial_zero_point,
-                "passthrough": self._passthrough,
-            }
-        )
+        config.update({
+            "scale": self._initial_scale,
+            "zero_point": self._initial_zero_point,
+            "passthrough": self._passthrough,
+        })
         return config
 
     def collect_write_ops(
@@ -143,13 +141,11 @@ class Quantize(keras.Layer, types.Writable):
     def get_config(self) -> dict[str, typing.Any]:
         """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
-        config.update(
-            {
-                "scale": self._initial_scale,
-                "zero_point": self._initial_zero_point,
-                "trainable": self._trainable_params,
-            }
-        )
+        config.update({
+            "scale": self._initial_scale,
+            "zero_point": self._initial_zero_point,
+            "trainable": self._trainable_params,
+        })
         return config
 
     def collect_write_ops(

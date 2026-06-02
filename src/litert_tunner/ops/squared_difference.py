@@ -110,16 +110,14 @@ class QuantizedSquaredDifference(keras.Layer, types.Writable):
 
     def get_config(self):
         config = super().get_config()
-        config.update(
-            {
-                "input1_scale": self._input1_scale,
-                "input1_zero_point": self._input1_zero_point,
-                "input2_scale": self._input2_scale,
-                "input2_zero_point": self._input2_zero_point,
-                "output_scale": self._output_scale,
-                "output_zero_point": self._output_zero_point,
-            }
-        )
+        config.update({
+            "input1_scale": self._input1_scale,
+            "input1_zero_point": self._input1_zero_point,
+            "input2_scale": self._input2_scale,
+            "input2_zero_point": self._input2_zero_point,
+            "output_scale": self._output_scale,
+            "output_zero_point": self._output_zero_point,
+        })
         return config
 
     def collect_write_ops(

@@ -72,15 +72,13 @@ class QuantizedGelu(keras.Layer, types.Writable):
 
     def get_config(self):
         config = super().get_config()
-        config.update(
-            {
-                "input_scale": self._input_scale,
-                "input_zero_point": self._input_zero_point,
-                "output_scale": self._output_scale,
-                "output_zero_point": self._output_zero_point,
-                "approximate": self._approximate,
-            }
-        )
+        config.update({
+            "input_scale": self._input_scale,
+            "input_zero_point": self._input_zero_point,
+            "output_scale": self._output_scale,
+            "output_zero_point": self._output_zero_point,
+            "approximate": self._approximate,
+        })
         return config
 
     def collect_write_ops(
