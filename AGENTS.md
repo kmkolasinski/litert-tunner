@@ -24,7 +24,9 @@ tunner_model = litert_tunner.load_model("model_int8.tflite")
 predictions = tunner_model.predict(inputs)
 
 # Fine-tune using the Trainer wrapper (handles freeze/unfreeze, metrics)
-tunner_model = litert_tunner.prepare_for_finetuning(tunner_model)
+tunner_model = litert_tunner.prepare_for_finetuning(
+    tunner_model, trainable_pattern=".*bias"
+)
 trainer = litert_tunner.Trainer(tunner_model)
 trainer.compile(optimizer=..., loss=..., metrics=...)
 trainer.fit(train_ds, validation_data=val_ds, epochs=5)
