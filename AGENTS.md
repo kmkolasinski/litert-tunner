@@ -23,9 +23,11 @@ tunner_model = litert_tunner.load_model("model_int8.tflite")
 # Inference — should match LiteRT Interpreter output
 predictions = tunner_model.predict(inputs)
 
-# Fine-tune (standard Keras training loop)
-tunner_model.compile(optimizer=..., loss=..., metrics=...)
-tunner_model.fit(train_ds, validation_data=val_ds, epochs=5)
+# Fine-tune using the Trainer wrapper (handles freeze/unfreeze, metrics)
+tunner_model = litert_tunner.prepare_for_finetuning(tunner_model)
+trainer = litert_tunner.Trainer(tunner_model)
+trainer.compile(optimizer=..., loss=..., metrics=...)
+trainer.fit(train_ds, validation_data=val_ds, epochs=5)
 
 # Export — writes updated parameters back into the flatbuffer
 litert_tunner.save_model(tunner_model, "model_int8_finetuned.tflite")
@@ -81,9 +83,6 @@ accumulation and before requantization.
   zero-points) in the existing flatbuffer. **Never modify the graph topology**
   — this guarantees the output file is always a valid LiteRT model.
 
-Uses the **`tflite` PyPI package** with the Object API (`Model`) for
-programmatic parse → modify → re-serialize, entirely in Python.
-
 ### Op Implementation Pattern
 
 Each quantized op follows the same pattern:
@@ -106,45 +105,74 @@ Each quantized op follows the same pattern:
 
 ### Shared Utilities (`ops/utils.py`)
 
-Key functions used across all op implementations:
+Key functions used across all op implementations (see source for full list):
 
-- `dequantize_ste` / `quantize_ste` / `_fake_quantize` — STE-based quant/dequant
+- `dequantize_ste` / `quantize_ste` / `fake_quantize` — STE-based quant/dequant
 - `apply_fused_activation` — TFLite fused activation dispatch
 - `get_bias_float32` — Extract and dequantize INT32 bias to float32
 - `get_quant_param_value` — Extract scalar or array quant params
-- `expand_dims_if_not_scalar` — Reshape for per-channel broadcasting
-- `quantize_to_int8` / `quantize_bias_to_int32` — Convert back for writing
-- `make_quant_write_op` / `to_float_list` / `to_int_list` — Write-op helpers
 - `compute_requantize_multiplier` — `(input_scale * weight_scale) / output_scale`
+- `make_quant_write_op` — Build `QuantizationWriteOp` for the flatbuffer writer
+- `extract_constant_input` — Extract constant tensor data from an operator
 
 ## Architecture & Code Organization
 
 ```text
 src/litert_tunner/
-├── __init__.py              # Public API: load_model, save_model
+├── __init__.py              # Public API: load_model, save_model, Trainer, etc.
+├── logging.py               # Logging configuration utilities
+├── testing_utils.py         # Public testing helpers (cosine similarity, allclose)
+├── trainer.py               # Trainer wrapper + prepare_for_finetuning
 ├── flatbuffer/              # Flatbuffer parsing & serialization
 │   ├── __init__.py          # Re-exports parse_tflite, save_tflite
 │   ├── parser.py            # Parse .tflite → GraphDef
 │   └── writer.py            # Write updated params back to .tflite
 ├── graph/                   # Internal graph representation
 │   ├── __init__.py          # Re-exports types and build_keras_model
-│   ├── types.py             # TensorInfo, OperatorInfo, GraphDef, Writable protocol
+│   ├── types.py             # TensorInfo, OperatorInfo, GraphDef, BufferWriteOp,
+│   │                        #   QuantizationWriteOp, Writable protocol
 │   └── builder.py           # Convert GraphDef → Keras Functional model
 └── ops/                     # Operation registry & implementations
     ├── __init__.py           # Imports all ops to trigger registration
     ├── registry.py           # @register_op decorator, get_op_builder()
     ├── utils.py              # Shared helpers: STE quant/dequant, fused activation, etc.
     ├── dense.py              # FULLY_CONNECTED
-    ...  # MORE OPS
+    ├── conv2d.py             # CONV_2D
+    ├── depthwise_conv2d.py   # DEPTHWISE_CONV_2D
+    ├── add.py                # ADD
+    ├── sub.py                # SUB
+    ├── mul.py                # MUL
+    ├── div.py                # DIV
+    ├── concatenation.py      # CONCATENATION
+    ├── mean.py               # MEAN
+    ├── pool.py               # AVERAGE_POOL_2D, MAX_POOL_2D
+    ├── softmax.py            # SOFTMAX
+    ├── logistic.py           # LOGISTIC
+    ├── relu.py               # RELU
+    ├── gelu.py               # GELU
+    ├── neg.py                # NEG
+    ├── rsqrt.py              # RSQRT
+    ├── squared_difference.py # SQUARED_DIFFERENCE
+    ├── reshape.py            # RESHAPE
+    ├── transpose.py          # TRANSPOSE
+    ├── pack.py               # PACK
+    ├── strided_slice.py      # STRIDED_SLICE
+    ├── resize_nearest_neighbor.py  # RESIZE_NEAREST_NEIGHBOR
+    ├── quantize_op.py        # QUANTIZE, DEQUANTIZE
+    └── shape_op.py           # SHAPE
 ```
 
 ```text
 tests/
 ├── conftest.py              # Shared fixtures: make_dense_tflite, make_mlp_tflite,
-│                            #   make_resnet_tflite, make_efficientnetb0_tflite,
-│                            #   run_interpreter, export_quantized_tflite_model
+│                            #   make_resnet_tflite, make_backbone_tflite,
+│                            #   make_efficientnetb0_tflite, run_interpreter,
+│                            #   export_quantized_tflite_model
 ├── test_load_save_roundtrip.py  # Load → save → verify bit-exact identity
 ├── test_finetuning_e2e.py       # Fine-tune bias → verify loss decreases → save/reload
+├── test_logging.py              # Logging module tests
+├── test_testing_utils.py        # Testing utilities tests
+├── test_trainer.py              # Trainer wrapper tests
 ├── flatbuffer/
 │   ├── test_parser.py       # Flatbuffer parser unit tests
 │   ├── test_writer.py       # Flatbuffer writer unit tests
@@ -153,30 +181,35 @@ tests/
 │   ├── op_test_utils.py     # Test helpers: make_tensor, build_and_call, assertions
 │   ├── test_utils.py        # Tests for ops/utils.py helpers
 │   ├── test_dense.py        # FullyConnected unit tests
-│   # MORE OPS TESTS
-└── networks/
-    ├── test_mlp.py          # Multi-layer MLP forward-pass tests
-    # MORE NETWORKS TESTS
+│   ├── test_passthrough_ops.py  # Reshape, Transpose, Pack, etc.
+│   ...                      # One test file per op
+├── networks/
+│   ├── test_mlp.py          # Multi-layer MLP forward-pass tests
+│   ├── test_resnet.py       # ResNet-like CNN forward-pass tests
+│   ├── test_efficientnet.py # EfficientNet backbone tests
+│   ├── test_mobilenet.py    # MobileNet backbone tests
+│   ├── test_convnext.py     # ConvNeXt backbone tests
+│   ├── test_constant_ops.py # Constant-input operator tests
+│   ...                      # More network-level tests
+└── experimental/
+    └── test_yolo.py         # Experimental YOLO model tests
 ```
 
-## Design Principles
+## Coding Standards
 
-## 6. Coding Standards
-
-### 6.1 General
+### General
 
 - **Python ≥ 3.11** — use modern syntax (type unions with `|`, `match`, etc.).
 - **Type hints everywhere** — all function signatures must be fully typed.
 - **Docstrings** — Google-style docstrings on all public functions and classes.
 - **Line length** — 100 characters max (configured in `ruff`).
-- **Linting** — must pass `ruff check` and `ruff format` (configured in
-  `pyproject.toml`). Use `ALL` rule selection with explicit ignores.
+- **Linting** — must pass `ruff check` and `ruff format` (configured in `pyproject.toml`).
 - **No magic numbers** — use named constants or enums.
 - **Random number generation** — always use the modern
   `np.random.default_rng(seed)` API to create a `Generator` instance
   (e.g. `rng.uniform(...)`). Avoid legacy `np.random.seed` / `np.random.uniform`.
 
-### 6.2 Import Style (Google-style)
+### Import Style (Google-style)
 
 Use **Google-style imports** throughout the project. Import modules, not
 individual symbols from modules.
@@ -200,11 +233,9 @@ from litert_tunner.flatbuffer.parser import parse_tflite  # NO
 from litert_tunner.graph.types import TensorInfo  # NO
 ```
 
-Each package's `__init__.py` must re-export the public API of its submodules
-so that `from litert_tunner import flatbuffer` then `flatbuffer.parse_tflite()`
-works. Keep `__init__.py` files minimal — only re-exports, no logic.
+Keep `__init__.py` files minimal — only re-exports, no logic.
 
-### 6.3 Test Naming Convention
+### Test Naming Convention
 
 All test functions must use a **double underscore** prefix to visually separate
 the `test` keyword from the descriptive name:
@@ -220,7 +251,7 @@ def test__quantize_dequantize_roundtrip(): ...
 def test_dense_output_matches_interpreter(): ...
 ```
 
-### 6.4 Dataclass Style
+### Dataclass Style
 
 Use `frozen=True` for all immutable data containers (graph types, quantization
 params, tensor info, etc.). Only use mutable dataclasses when mutation is
@@ -234,7 +265,7 @@ class QuantizationParams:
     quantized_dimension: int
 ```
 
-### 6.5 Keras 3 Backend-Agnostic Code
+### Keras 3 Backend-Agnostic Code
 
 The tunner model must be **backend-agnostic** using Keras 3:
 
@@ -248,37 +279,7 @@ The tunner model must be **backend-agnostic** using Keras 3:
   and test model export. Use `ai_edge_litert.interpreter.Interpreter` for
   inference in tests.
 
-- **Import pattern**:
-
-  ```python
-  # ✅ Production code
-  import keras
-  from keras import ops
-
-  # ✅ Test code only
-  import tensorflow as tf
-  from ai_edge_litert.interpreter import Interpreter
-  ```
-
-### 6.6 Dependencies
-
-Core dependencies (in `pyproject.toml`):
-
-- `keras >= 3.0` — model building and training (backend-agnostic)
-- `numpy` — numerical operations
-- `tflite >= 2.18.0` — TFLite FlatBuffer schema parsing
-- `flatbuffers` — FlatBuffer serialization/deserialization
-
-Test / dev dependencies:
-
-- `tensorflow >= 2.18.0` — for `tf.lite.TFLiteConverter` (tests only)
-- `ai-edge-litert` — LiteRT runtime (`Interpreter`)
-- `pytest`, `pytest-xdist`, `pytest-forked`, `pytest-cov`, `pytest-randomly`,
-  `pytest-dotenv`, `ruff`, etc.
-
-Keep the dependency footprint minimal. Do not add unnecessary libraries.
-
-### 6.7 Environment
+### Environment
 
 - **Always check** the active environment before running any Python code,
   tests, or scripts.
@@ -297,9 +298,9 @@ Keep the dependency footprint minimal. Do not add unnecessary libraries.
     npm prompts. To configure it to use the project's virtual environment, pass
     the `--pythonpath .venv/bin/python` argument (do not use `--venv`).
 
-## 7. Testing Pipeline
+## Testing Pipeline
 
-### 7.1 Test Fixtures (in `tests/conftest.py`)
+### Test Fixtures (in `tests/conftest.py`)
 
 Tests use pytest fixtures to generate quantized TFLite models on the fly:
 
@@ -308,26 +309,31 @@ Tests use pytest fixtures to generate quantized TFLite models on the fly:
   connections, batch normalization, and various activations.
 - **`make_resnet_tflite`** — creates ResNet-like CNN models with Conv2D,
   residual connections, pooling, and batch normalization.
-- **`make_efficientnetb0_tflite`** — creates an EfficientNetB0-based model.
+- **`make_backbone_tflite`** — creates models using any `keras.applications`
+  backbone (e.g., EfficientNet, MobileNet, ConvNeXt) with a classification head.
+- **`make_efficientnetb0_tflite`** — backward-compatible wrapper around
+  `make_backbone_tflite` that defaults to EfficientNetB0.
 - **`run_interpreter`** — runs a `.tflite` model through the LiteRT Interpreter
   and returns outputs. Handles INT8/float32 input type conversion.
 - **`export_quantized_tflite_model`** — helper that converts a Keras model to
   a fully-quantized INT8 TFLite model using `tf.lite.TFLiteConverter` with
   a representative dataset.
 
-### 7.2 Op-Level Tests (`tests/ops/`)
+### Op-Level Tests (`tests/ops/`)
 
 Each op has unit tests that verify the builder, layer call, trainable weights,
 and `Writable` protocol. The shared framework `tests/ops/op_test_utils.py`
-provides:
+provides (see source for full list):
 
 - `make_tensor`, `make_operator`, `make_quant_params` — fixture factories
 - `build_and_call` — build from registry + call in one step
 - `assert_trainable_weight_names` / `assert_non_trainable_weight_names`
 - `assert_layer_is_writable` / `assert_layer_not_writable`
 - `assert_collect_write_ops` — verify write-op counts and tensor indices
+- `verify_model_outputs` — end-to-end comparison of Keras vs Interpreter
+- `verify_model_contains_operator` — assert a TFLite model contains a given op
 
-### 7.3 Network-Level Forward-Pass Tests (`tests/networks/`)
+### Network-Level Forward-Pass Tests (`tests/networks/`)
 
 These are the primary correctness tests. The pattern for every network test:
 
@@ -349,7 +355,7 @@ def test__mlp_single_layer_forward(make_mlp_tflite, run_interpreter):
     # 5. Save and verify round-trip
     litert_tunner.save_model(keras_model, str(model_path))
     litert_saved_outputs = run_interpreter(model_path, x_train)
-    np.testing.assert_allclose(keras_outputs, litert_saved_outputs, atol=1e-3)
+    np.testing.assert_allclose(litert_outputs, litert_saved_outputs, atol=1e-5)
 ```
 
 Key points:
@@ -360,7 +366,7 @@ Key points:
 - Every test also verifies the **save round-trip**: save the model back to
   `.tflite`, re-run through the Interpreter, confirm outputs still match.
 
-### 7.4 Integration Tests
+### Integration Tests
 
 - **`test_load_save_roundtrip.py`** — Verifies load → save → reload produces
   **bit-exact identical** outputs. Also tests that manual parameter modification
@@ -369,7 +375,7 @@ Key points:
   all params except bias → fine-tune on shifted targets → verify loss decreases
   → save → verify the Interpreter also shows improved predictions.
 
-### 7.5 Running Tests
+### Running Tests
 
 ```bash
 # Activate the virtual environment
@@ -382,7 +388,7 @@ source .venv/bin/activate
 make precommit
 ```
 
-## 8. Agent Workflow Checklist
+## Agent Workflow Checklist
 
 When an agent is asked to implement a new feature (e.g., a new op), follow this
 checklist:
@@ -407,7 +413,7 @@ checklist:
   broken.
 - [ ] **Update this file** if the change affects architecture or conventions.
 
-## 9. What NOT to Do
+## What NOT to Do
 
 - **Do not modify the graph topology on save.** The flatbuffer graph must
   remain structurally identical — only buffer data changes.
