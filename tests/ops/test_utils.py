@@ -180,21 +180,20 @@ def test__round_ste():
     np.testing.assert_allclose(_to_numpy(grads), [1.0, 1.0, 1.0])
 
 
-def test__clip_ste():
-    """Verify _clip_ste clips forward and passes gradients backward."""
-    x = tf.constant([-130.0, 0.0, 150.0], dtype=tf.float32)
-    with tf.GradientTape() as tape:
-        tape.watch(x)
-        y = utils._clip_ste(x, -128.0, 127.0)
-
-    np.testing.assert_allclose(_to_numpy(y), [-128.0, 0.0, 127.0])
-    grads = tape.gradient(y, x)
-    # STE: gradient is identity (all ones)
-    np.testing.assert_allclose(_to_numpy(grads), [1.0, 1.0, 1.0])
+def test__softplus_inverse_roundtrip():
+    """Verify _softplus_inverse is the true inverse of softplus."""
+    scales = np.array([0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 25.0], dtype=np.float32)
+    raw = utils._softplus_inverse(scales)
+    recovered = _to_numpy(ops.softplus(ops.convert_to_tensor(raw)))
+    np.testing.assert_allclose(recovered, scales, rtol=1e-5)
 
 
 def test__quantize_ste():
-    """Verify quantize_ste simulates quantization and propagates gradients."""
+    """Verify quantize_ste simulates quantization and propagates gradients.
+
+    Gradients are zeroed for saturated values (outside [-128, 127] after
+    round + shift) thanks to hard clip, and are 1/scale for in-range values.
+    """
     x = tf.constant([-1.2, -0.2, 0.3, 1.4], dtype=tf.float32)
     scale = 0.05
     zero_point = -10.0
@@ -208,8 +207,11 @@ def test__quantize_ste():
     np.testing.assert_allclose(_to_numpy(y), expected, atol=1e-5)
 
     grads = tape.gradient(y, x)
-    # STE gradient is scale inverse
-    np.testing.assert_allclose(_to_numpy(grads), np.ones(4) / scale, atol=1e-5)
+    # Hard clip: gradient is 1/scale for in-range values, 0 for saturated
+    raw_shifted = np.round(_to_numpy(x) / scale) + zero_point
+    in_range = (raw_shifted >= -128.0) & (raw_shifted <= 127.0)
+    expected_grads = np.where(in_range, 1.0 / scale, 0.0)
+    np.testing.assert_allclose(_to_numpy(grads), expected_grads, atol=1e-5)
 
 
 def test__dequantize_ste():

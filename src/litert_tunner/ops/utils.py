@@ -145,6 +145,10 @@ def apply_fused_activation(x: TensorLike, fused_activation: int) -> TensorLike:
 # INT8 range constants
 _INT8_MIN_F = -128.0
 _INT8_MAX_F = 127.0
+
+# Threshold for softplus inverse: above this value, softplus_inverse(x) ≈ x.
+# Chosen to avoid overflow in exp() while maintaining float32 precision.
+_SOFTPLUS_INV_THRESHOLD = 20.0
 INT8_MIN = -128
 INT8_MAX = 127
 
@@ -225,21 +229,17 @@ def _round_ste(x: TensorLike) -> TensorLike:
     return x + ops.stop_gradient(ops.round(x) - x)
 
 
-def _clip_ste(x: TensorLike, min_val: float, max_val: float) -> TensorLike:
-    """Clip with Straight-Through Estimator.
-
-    Forward: clip(x, min_val, max_val)
-    Backward: identity (gradient passes through unchanged)
-    """
-    return x + ops.stop_gradient(ops.clip(x, min_val, max_val) - x)
-
-
 def quantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
-    """Quantize float32 → simulated INT8 with STE gradients."""
+    """Quantize float32 → simulated INT8 with STE gradients.
+
+    Uses hard clip so that gradients are zeroed for values that saturate
+    outside the [-128, 127] range. This prevents the optimizer from wasting
+    gradient budget pushing already-saturated values further out of range.
+    """
     scaled = x / scale
     rounded = _round_ste(scaled)
     shifted = rounded + zero_point
-    return _clip_ste(shifted, _INT8_MIN_F, _INT8_MAX_F)
+    return ops.clip(shifted, _INT8_MIN_F, _INT8_MAX_F)
 
 
 def dequantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
@@ -334,8 +334,33 @@ def extract_constant_input(
     return None, -1
 
 
+def _softplus_inverse(x: np.ndarray) -> np.ndarray:
+    """Compute the inverse of softplus: log(exp(x) - 1).
+
+    For large x (> 20), this is numerically equivalent to x itself,
+    avoiding overflow in exp.
+
+    Args:
+        x: Input array. Must contain only positive values.
+
+    Returns:
+        Array y such that softplus(y) ≈ x.
+    """
+    x = np.asarray(x, dtype=np.float32)
+    return np.where(x > _SOFTPLUS_INV_THRESHOLD, x, np.log(np.expm1(x)))
+
+
 class QuantizationVars:
-    """A container for quantization scale and zero_point variables."""
+    """A container for quantization scale and zero_point variables.
+
+    When ``trainable=True``, the scale is stored in a reparameterized form
+    using the inverse softplus transform.  During the forward pass the
+    actual scale is recovered via ``softplus(raw)``, which guarantees
+    ``scale > 0`` regardless of how the optimizer updates the raw variable.
+    This prevents division-by-zero in ``quantize_ste`` and ensures the
+    dequantization formula ``scale * (int8 - zp)`` preserves its
+    monotonicity.
+    """
 
     def __init__(
         self,
@@ -348,18 +373,40 @@ class QuantizationVars:
     ):
         name_scale = f"{name}_scale" if name else "scale"
         name_zp = f"{name}_zero_point" if name else "zero_point"
-        self.scale = layer.add_weight(
-            name=name_scale,
-            shape=np.shape(scale),
-            initializer=keras.initializers.Constant(typing.cast("float", scale)),
-            trainable=trainable,
-        )
+
+        self._trainable_scale = trainable
+
+        if trainable:
+            # Store inverse-softplus(scale) so the optimizer works in
+            # unconstrained space and softplus maps back to (0, +∞).
+            raw_scale = _softplus_inverse(np.asarray(scale, dtype=np.float32))
+            self._scale_var = layer.add_weight(
+                name=name_scale,
+                shape=np.shape(scale),
+                initializer=keras.initializers.Constant(typing.cast("float", raw_scale)),
+                trainable=True,
+            )
+        else:
+            self._scale_var = layer.add_weight(
+                name=name_scale,
+                shape=np.shape(scale),
+                initializer=keras.initializers.Constant(typing.cast("float", scale)),
+                trainable=False,
+            )
+
         self.zero_point = layer.add_weight(
             name=name_zp,
             shape=np.shape(zero_point),
             initializer=keras.initializers.Constant(typing.cast("float", zero_point)),
             trainable=False,
         )
+
+    @property
+    def scale(self) -> TensorLike:
+        """Returns the scale, applying softplus if the scale is trainable."""
+        if self._trainable_scale:
+            return ops.softplus(self._scale_var)
+        return self._scale_var
 
     def dequantize(self, x: TensorLike) -> TensorLike:
         """Dequantize an INT8 tensor to Float32."""
