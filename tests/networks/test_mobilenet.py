@@ -23,14 +23,14 @@ def test__make_mobilenetv2_tflite_creates_valid_model(
     model_path = make_backbone_tflite(
         input_shape=input_shape,
         weights=None,
-        num_outputs=100,
+        num_outputs=1000,
         float_io=True,
         backbone_name="MobileNetV2",
     )
 
     rng = np.random.default_rng(42)
     # Use a small batch size for quick verification
-    x_train = rng.uniform(-1.0, 1.0, (2, 96, 96, 3)).astype(np.float32)
+    x_train = rng.uniform(0.0, 255.0, (2, *input_shape)).astype(np.float32)
     litert_outputs = run_interpreter(model_path, x_train)
 
     # Compare original LiteRT model with Keras parsed
