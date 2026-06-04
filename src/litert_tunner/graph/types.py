@@ -131,6 +131,18 @@ class GraphDef:
     raw_model_bytes: bytes
 
 
+def is_quantized(tensor: TensorInfo) -> bool:
+    """Check whether a tensor has quantization parameters.
+
+    Args:
+        tensor: The tensor to check.
+
+    Returns:
+        True if the tensor has non-None quantization params.
+    """
+    return tensor.quantization is not None
+
+
 @runtime_checkable
 class Writable(Protocol):
     """Protocol for Keras layers that know how to serialize themselves back to a flatbuffer.

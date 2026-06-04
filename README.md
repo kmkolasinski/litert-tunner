@@ -156,13 +156,13 @@ All fake-quantization simulation uses the standard TFLite affine scheme:
 **Dequantize (INT8 → Float32):**
 
 ```python
-real_value = scale × (int8_value − zero_point)
+real_value = scale * (int8_value - zero_point)
 ```
 
 **Quantize (Float32 → INT8):**
 
 ```python
-int8_value = clamp(round(real_value / scale) + zero_point, −128, 127)
+int8_value = clamp(round(real_value / scale) + zero_point, -128, 127)
 ```
 
 Gradients flow through quantization via the **Straight-Through Estimator**

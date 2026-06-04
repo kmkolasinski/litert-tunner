@@ -120,6 +120,33 @@ def get_bias_float32(
     return np.zeros(output_units, dtype=np.float32)
 
 
+def get_float32_bias(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+    output_units: int,
+) -> np.ndarray:
+    """Extract bias as float32 from a float32 model (no dequantization needed).
+
+    In float32 TFLite models, bias is already stored as FLOAT32. This helper
+    simply reads the raw data, unlike ``get_bias_float32`` which dequantizes
+    INT32 bias using input/weight scales.
+
+    Args:
+        op: The parsed operator info.
+        tensors: All tensors in the graph.
+        output_units: Fallback size if bias is absent.
+
+    Returns:
+        Float32 bias as a numpy array.
+    """
+    bias_index = 2
+    if len(op.input_indices) > bias_index and op.input_indices[bias_index] >= 0:
+        bias_tensor = tensors[op.input_indices[bias_index]]
+        if bias_tensor.data is not None:
+            return bias_tensor.data.astype(np.float32)
+    return np.zeros(output_units, dtype=np.float32)
+
+
 def apply_fused_activation(x: TensorLike, fused_activation: int) -> TensorLike:
     """Applies a TFLite fused activation function to a tensor.
 

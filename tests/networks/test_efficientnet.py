@@ -18,7 +18,7 @@ def test__make_efficientnetb0_tflite_creates_valid_model(
     run_interpreter: Callable,
 ) -> None:
     """Verify that make_efficientnetb0_tflite creates a valid, executable TFLite model."""
-    input_shape = (96, 96, 3)
+    input_shape = (32, 32, 3)
     # Using weights=None to avoid network dependency in tests
     model_path = make_efficientnetb0_tflite(
         input_shape=input_shape,
@@ -29,7 +29,7 @@ def test__make_efficientnetb0_tflite_creates_valid_model(
 
     rng = np.random.default_rng(42)
     # Use a small batch size for quick verification
-    x_train = rng.uniform(-1.0, 1.0, (2, 96, 96, 3)).astype(np.float32)
+    x_train = rng.uniform(-1.0, 1.0, (2, 32, 32, 3)).astype(np.float32)
     litert_outputs = run_interpreter(model_path, x_train)
 
     # Compare original LiteRT model with Keras parsed

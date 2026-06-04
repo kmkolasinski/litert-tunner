@@ -6,7 +6,7 @@ import keras
 import numpy as np
 
 from litert_tunner.graph import types
-from litert_tunner.ops import registry
+from litert_tunner.ops import registry, reshape
 from tests.conftest import export_quantized_tflite_model
 from tests.ops import op_test_utils
 
@@ -95,6 +95,25 @@ class TestReshape:
 
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 8), dtype=np.float32))
         op_test_utils.assert_layer_not_writable(layer)
+
+    def test__reshape_dynamic_shape_bug_reproduction(self):
+        """Verify dynamic shape inputs work without crashing."""
+        layer = reshape.QuantizedReshape(target_shape=(1, 1, 32), name="quantized_reshape_test")
+
+        data_input = keras.Input(shape=(32,), dtype="float32")
+        shape_input = keras.Input(shape=(4,), dtype="float32")
+
+        model = keras.Model(
+            inputs=[data_input, shape_input],
+            outputs=layer([data_input, shape_input]),
+        )
+
+        rng = np.random.default_rng(42)
+        data = rng.standard_normal((2, 32)).astype(np.float32)
+        shape_vec = np.array([2, 1, 1, 32], dtype=np.float32)
+        shape_batch = np.tile(shape_vec, (2, 1))
+        out = model.predict([data, shape_batch])
+        assert out.shape == (2, 1, 1, 32)
 
 
 # ===================================================================

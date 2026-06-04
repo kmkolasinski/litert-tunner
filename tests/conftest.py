@@ -354,3 +354,54 @@ def run_interpreter() -> Callable:
         return outputs
 
     return _run
+
+
+def export_float32_tflite_model(
+    input_shape: tuple[int, ...], model: keras.Model, output_path: Path
+):
+    """Export a Keras model to a float32 (unquantized) TFLite model.
+
+    Unlike ``export_quantized_tflite_model``, this applies no quantization.
+    The resulting model has all tensors in FLOAT32.
+
+    Args:
+        input_shape: Shape of the model input (excluding batch).
+        model: The Keras model to convert.
+        output_path: Where to save the .tflite file.
+    """
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    tflite_model = converter.convert()
+
+    with output_path.open("wb") as f:
+        f.write(tflite_model)
+
+
+@pytest.fixture
+def make_float32_dense_tflite(temp_model_dir: Path) -> Callable:
+    """Fixture returning a function to create float32 (unquantized) FullyConnected TFLite models."""
+
+    def _make(
+        num_features: int = 8,
+        num_units: int = 1,
+        use_bias: bool = True,
+        activation: str | None = None,
+        seed: int = 42,
+    ) -> Path:
+        keras.utils.set_random_seed(seed)
+
+        inputs = keras.Input(shape=(num_features,))
+        outputs = keras.layers.Dense(
+            units=num_units,
+            use_bias=use_bias,
+            activation=activation,
+            kernel_initializer=cast("Any", keras.initializers.RandomUniform(-0.5, 0.5)),
+            bias_initializer=cast("Any", keras.initializers.RandomUniform(-0.1, 0.1)),
+        )(inputs)
+        model = keras.Model(inputs=inputs, outputs=outputs)
+
+        output_path = temp_model_dir / f"float32_dense_{num_units}_{activation}.tflite"
+        export_float32_tflite_model((num_features,), model, output_path)
+
+        return output_path
+
+    return _make

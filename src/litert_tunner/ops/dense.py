@@ -1,9 +1,13 @@
 """FullyConnected (Dense) op implementation for litert_tunner.
 
-Simulates TFLite's quantized FullyConnected op as a Keras layer.
-The forward pass replicates the integer arithmetic in float32,
-enabling gradient flow through trainable parameters (bias, scales,
-zero-points).
+Supports both quantized INT8 and float32 TFLite FullyConnected ops.
+
+- **Quantized path** (``QuantizedDense``): Simulates TFLite's quantized
+  FullyConnected op, replicating integer arithmetic in float32 with STE
+  gradient flow through trainable parameters (bias, scales, zero-points).
+
+- **Float path** (``FloatDense``): Thin wrapper around matmul + bias for
+  float32 TFLite models. All weights are directly trainable.
 """
 
 from __future__ import annotations
@@ -218,39 +222,163 @@ class QuantizedDense(keras.Layer, types.Writable):
         return buffer_writes, quant_writes
 
 
+class FloatDense(keras.Layer, types.Writable):
+    """Float32 TFLite FullyConnected op as a Keras layer.
+
+    The forward pass performs a simple matmul + bias with an optional fused
+    activation. No quantization/dequantization is involved.
+
+    All weights (kernel and bias) are trainable by default.
+
+    Args:
+        kernel_data: Float32 weight values, shape (out_units, in_features).
+        bias_data: Float32 bias values, shape (out_units,).
+        fused_activation: TFLite fused activation code (0=none, 1=relu, 3=relu6).
+        name: Layer name.
+    """
+
+    def __init__(
+        self,
+        kernel_data: np.ndarray,
+        bias_data: np.ndarray,
+        fused_activation: int = utils.FUSED_ACTIVATION_NONE,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._kernel_data = kernel_data.astype(np.float32)
+        self._bias_data = bias_data.astype(np.float32)
+        self._fused_activation = fused_activation
+
+    def build(self, input_shape: ShapeLike) -> None:
+        """Create trainable kernel and bias weights."""
+        self.kernel = self.add_weight(
+            name="kernel",
+            shape=self._kernel_data.shape,
+            initializer=keras.initializers.Constant(typing.cast("float", self._kernel_data)),
+            trainable=True,
+        )
+        self.bias = self.add_weight(
+            name="bias",
+            shape=self._bias_data.shape,
+            initializer=keras.initializers.Constant(typing.cast("float", self._bias_data)),
+            trainable=True,
+        )
+        super().build(input_shape)
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Forward pass: matmul + bias + optional fused activation.
+
+        Args:
+            x: Float32 input tensor.
+
+        Returns:
+            Float32 output tensor.
+        """
+        # TFLite FullyConnected: output = input @ weight^T + bias
+        output = ops.matmul(x, ops.transpose(self.kernel)) + self.bias
+        return utils.apply_fused_activation(output, self._fused_activation)
+
+    def get_config(self):
+        """Return the configuration dictionary for serialization of the layer."""
+        config = super().get_config()
+        config.update({"fused_activation": self._fused_activation})
+        return config
+
+    def collect_write_ops(
+        self,
+        op: types.OperatorInfo,
+    ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
+        """Return flatbuffer write instructions for the float32 FullyConnected layer.
+
+        Writes back float32 kernel and float32 bias buffers. No quantization
+        write ops are emitted since this is a float32 model.
+
+        Args:
+            op: The OperatorInfo that this layer was built from.
+
+        Returns:
+            A tuple of (buffer_writes, quantization_writes).
+        """
+        buffer_writes: list[types.BufferWriteOp] = []
+
+        op_inputs = typing.cast("typing.Any", op.input_indices)
+
+        # Write float32 kernel
+        kernel_np = typing.cast("np.ndarray", ops.convert_to_numpy(self.kernel)).astype(np.float32)
+        buffer_writes.append(
+            types.BufferWriteOp(
+                tensor_index=op_inputs[1],
+                data=bytes(kernel_np.tobytes()),
+            )
+        )
+
+        # Write float32 bias (if present)
+        bias_index = 2
+        if len(op_inputs) > bias_index and op_inputs[bias_index] >= 0:
+            bias_np = typing.cast("np.ndarray", ops.convert_to_numpy(self.bias)).astype(np.float32)
+            buffer_writes.append(
+                types.BufferWriteOp(
+                    tensor_index=op_inputs[2],
+                    data=bytes(bias_np.tobytes()),
+                )
+            )
+
+        return buffer_writes, []
+
+
+# ---------------------------------------------------------------------------
+# Builder
+# ---------------------------------------------------------------------------
+
+
 @registry.register_op("FULLY_CONNECTED")
 def build_fully_connected(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a QuantizedDense layer from parsed TFLite operator info.
+    """Build a Dense layer from parsed TFLite operator info.
+
+    Dispatches to ``QuantizedDense`` for INT8 models or ``FloatDense`` for
+    float32 models based on whether the input tensor has quantization params.
 
     TFLite FullyConnected inputs:
-        [0] input tensor (INT8)
-        [1] weight tensor (INT8)
-        [2] bias tensor (INT32, optional)
+        [0] input tensor (INT8 or FLOAT32)
+        [1] weight tensor (INT8 or FLOAT32)
+        [2] bias tensor (INT32 or FLOAT32, optional)
 
     TFLite FullyConnected outputs:
-        [0] output tensor (INT8)
+        [0] output tensor (INT8 or FLOAT32)
 
     Args:
         op: Parsed operator info with input/output indices and options.
         tensors: All tensors in the graph.
-        graph_def: The parsed GraphDef.
 
     Returns:
-        A configured QuantizedDense Keras layer.
+        A configured QuantizedDense or FloatDense Keras layer.
     """
     input_tensor = tensors[op.input_indices[0]]
     weight_tensor = tensors[op.input_indices[1]]
-    output_tensor = tensors[op.output_indices[0]]
 
     # Weight data must be available
     if weight_tensor.data is None:
         msg = f"Weight tensor '{weight_tensor.name}' has no data"
         raise ValueError(msg)
 
-    # Extract quantization params
+    if types.is_quantized(input_tensor):
+        return _build_quantized_dense(op, tensors)
+    return _build_float_dense(op, tensors)
+
+
+def _build_quantized_dense(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> QuantizedDense:
+    """Build a QuantizedDense layer for INT8 models."""
+    input_tensor = tensors[op.input_indices[0]]
+    weight_tensor = tensors[op.input_indices[1]]
+    output_tensor = tensors[op.output_indices[0]]
+    assert weight_tensor.data is not None  # validated by build_fully_connected  # noqa: S101
+
     input_quant = input_tensor.quantization
     weight_quant = weight_tensor.quantization
     output_quant = output_tensor.quantization
@@ -269,7 +397,6 @@ def build_fully_connected(
     )
 
     fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
-
     weight_scale_val = utils.get_quant_param_value(weight_quant.scales)
     weight_zp_val = utils.get_quant_param_value(weight_quant.zero_points)
 
@@ -284,4 +411,29 @@ def build_fully_connected(
         output_zero_point=float(output_quant.zero_points[0]),
         fused_activation=fused_activation,
         name=f"quantized_dense_{op.output_indices[0]}",
+    )
+
+
+def _build_float_dense(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> FloatDense:
+    """Build a FloatDense layer for float32 models."""
+    weight_tensor = tensors[op.input_indices[1]]
+    assert weight_tensor.data is not None  # validated by build_fully_connected  # noqa: S101
+    output_units = weight_tensor.shape[0]
+
+    bias_float = utils.get_float32_bias(
+        op=op,
+        tensors=tensors,
+        output_units=output_units,
+    )
+
+    fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
+
+    return FloatDense(
+        kernel_data=weight_tensor.data,
+        bias_data=bias_float,
+        fused_activation=fused_activation,
+        name=f"float_dense_{op.output_indices[0]}",
     )

@@ -9,7 +9,7 @@ import pytest
 import litert_tunner
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
-from tests.conftest import export_quantized_tflite_model
+from tests.conftest import export_float32_tflite_model, export_quantized_tflite_model
 from tests.ops import op_test_utils
 
 
@@ -295,4 +295,213 @@ def test__dense_integration(temp_model_dir, run_interpreter):
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
 
+    op_test_utils.verify_model_contains_operator(output_path, "FULLY_CONNECTED")
+
+
+# ===================================================================
+# Float32 Dense — Fixtures
+# ===================================================================
+
+
+@pytest.fixture
+def float_dense_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a minimal FULLY_CONNECTED op with float32 I/O (no quantization)."""
+    rng = np.random.default_rng(42)
+
+    input_tensor = op_test_utils.make_tensor(
+        name="input_f32", index=0, shape=(1, 4), dtype=types.DTYPE_FLOAT32, quantization=None
+    )
+
+    kernel_data = rng.uniform(-0.5, 0.5, (2, 4)).astype(np.float32)
+    weight_tensor = op_test_utils.make_tensor(
+        name="weight_f32",
+        index=1,
+        shape=(2, 4),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+        data=kernel_data,
+    )
+
+    bias_data = np.array([0.1, -0.2], dtype=np.float32)
+    bias_tensor = op_test_utils.make_tensor(
+        name="bias_f32",
+        index=2,
+        shape=(2,),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+        data=bias_data,
+    )
+
+    output_tensor = op_test_utils.make_tensor(
+        name="output_f32", index=3, shape=(1, 2), dtype=types.DTYPE_FLOAT32, quantization=None
+    )
+
+    tensors = (input_tensor, weight_tensor, bias_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="FULLY_CONNECTED",
+        input_indices=(0, 1, 2),
+        output_indices=(3,),
+    )
+    return op, tensors
+
+
+# ===================================================================
+# Float32 Dense tests
+# ===================================================================
+
+
+class TestFloatDenseBuild:
+    """Tests for the FULLY_CONNECTED op builder with float32 tensors."""
+
+    def test__float_dense_build_returns_keras_layer(self, float_dense_setup):
+        """Builder must return a Keras layer for float32 inputs."""
+        op, tensors = float_dense_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        assert isinstance(layer, keras.Layer)
+
+    def test__float_dense_layer_name_contains_output_index(self, float_dense_setup):
+        """Layer name must contain the output tensor index for writer lookup."""
+        op, tensors = float_dense_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        output_idx = op.output_indices[0]
+        assert layer.name.endswith(f"_{output_idx}"), (
+            f"Layer name {layer.name!r} must end with '_{output_idx}'"
+        )
+
+    def test__float_dense_build_raises_without_weights(self, float_dense_setup):
+        """Builder must raise if the weight tensor has no data."""
+        op, tensors = float_dense_setup
+        tensors_list = list(tensors)
+        tensors_list[1] = op_test_utils.make_tensor(
+            name="weight_f32",
+            index=1,
+            shape=(2, 4),
+            dtype=types.DTYPE_FLOAT32,
+            quantization=None,
+            data=None,
+        )
+        with pytest.raises(ValueError, match="has no data"):
+            op_test_utils.build_layer_from_registry(op, tuple(tensors_list))
+
+
+class TestFloatDenseCall:
+    """Tests for calling the float32 FULLY_CONNECTED layer."""
+
+    def test__float_dense_output_shape(self, float_dense_setup):
+        """Output shape must match expected matmul shape."""
+        op, tensors = float_dense_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (2, 4)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_output_shape(output, (2, 2))
+
+    def test__float_dense_formula_matches_numpy(self, float_dense_setup):
+        """Float32 dense must match simple numpy matmul + bias."""
+        op, tensors = float_dense_setup
+        rng = np.random.default_rng(123)
+        input_data = rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32)
+
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+
+        # Manual computation: output = input @ weight^T + bias
+        kernel = tensors[1].data
+        bias = tensors[2].data
+        expected = input_data @ kernel.T + bias
+        np.testing.assert_allclose(output, expected, atol=1e-5)
+
+
+class TestFloatDenseTrainableWeights:
+    """Tests for float32 FULLY_CONNECTED layer trainable parameters."""
+
+    def test__float_dense_trainable_weights(self, float_dense_setup):
+        """Float32 FullyConnected must have trainable kernel and bias."""
+        op, tensors = float_dense_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        op_test_utils.assert_trainable_weight_names(layer, {"kernel", "bias"})
+
+    def test__float_dense_no_non_trainable_weights(self, float_dense_setup):
+        """Float32 FullyConnected must have no non-trainable weights."""
+        op, tensors = float_dense_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        op_test_utils.assert_non_trainable_weight_names(layer, set())
+
+
+class TestFloatDenseWriteOps:
+    """Tests for float32 FULLY_CONNECTED layer collect_write_ops."""
+
+    def test__float_dense_is_writable(self, float_dense_setup):
+        """Float32 FullyConnected must implement the Writable protocol."""
+        op, tensors = float_dense_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        op_test_utils.assert_layer_is_writable(layer)
+
+    def test__float_dense_write_ops_counts(self, float_dense_setup):
+        """Float32 FullyConnected must emit 2 buffer writes (kernel, bias) and 0 quant writes."""
+        op, tensors = float_dense_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        op_test_utils.assert_collect_write_ops(
+            layer,
+            op,
+            expected_buffer_writes=2,
+            expected_quant_writes=0,
+        )
+
+    def test__float_dense_write_ops_buffer_indices(self, float_dense_setup):
+        """Buffer writes must target kernel and bias tensor indices."""
+        op, tensors = float_dense_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        buffer_writes, _ = layer.collect_write_ops(op)
+        op_test_utils.assert_buffer_write_tensor_indices(
+            buffer_writes, {op.input_indices[1], op.input_indices[2]}
+        )
+
+
+# ===================================================================
+# Float32 Dense integration tests
+# ===================================================================
+
+
+def test__float32_dense_forward_matches_interpreter(
+    make_float32_dense_tflite: Callable, run_interpreter: Callable
+):
+    """Float32 dense model Keras output must match LiteRT Interpreter output."""
+    model_path = make_float32_dense_tflite(
+        num_features=8, num_units=4, use_bias=True, activation=None
+    )
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (2, 8)).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(model_path, x_train, run_interpreter)
+
+
+def test__float32_dense_with_relu_matches_interpreter(
+    make_float32_dense_tflite: Callable, run_interpreter: Callable
+):
+    """Float32 dense with fused relu must match Interpreter output."""
+    model_path = make_float32_dense_tflite(
+        num_features=8, num_units=4, use_bias=True, activation="relu"
+    )
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (2, 8)).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(model_path, x_train, run_interpreter)
+
+
+def test__float32_dense_integration(temp_model_dir, run_interpreter):
+    """Full integration: build float32 dense, load, compare, save, compare again."""
+    keras.utils.set_random_seed(42)
+
+    inputs = keras.Input(shape=(4,))
+    outputs = keras.layers.Dense(8)(inputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+
+    output_path = temp_model_dir / "float32_dense_integration.tflite"
+    export_float32_tflite_model((4,), model, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
     op_test_utils.verify_model_contains_operator(output_path, "FULLY_CONNECTED")
