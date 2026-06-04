@@ -26,7 +26,9 @@ def test__mlp_single_layer_forward(make_mlp_tflite: Callable, run_interpreter: C
 
     # outputs are normalized to -1, 1
     max_value = np.abs(litert_outputs).max()
-    np.testing.assert_allclose(litert_outputs / max_value, keras_outputs / max_value, atol=0.0001)
+    np.testing.assert_allclose(
+        litert_outputs / max_value, keras_outputs / max_value, atol=testing_utils.QUANT_STEP
+    )
 
     # save the model and make sure the outputs are still the same
     litert_tunner.save_model(keras_model, str(model_path))
@@ -54,7 +56,9 @@ def test__mlp_multiple_layers_forward(make_mlp_tflite: Callable, run_interpreter
 
     # outputs are normalized to -1, 1
     max_value = np.abs(litert_outputs).max()
-    np.testing.assert_allclose(litert_outputs / max_value, keras_outputs / max_value, atol=0.0001)
+    np.testing.assert_allclose(
+        litert_outputs / max_value, keras_outputs / max_value, atol=testing_utils.QUANT_STEP
+    )
 
     # save the model and make sure the outputs are still the same
     litert_tunner.save_model(keras_model, str(model_path))
@@ -86,7 +90,9 @@ def test__mlp_multiple_layers_batchnorm_forward(
 
     # outputs are normalized to -1, 1
     max_value = np.abs(litert_outputs).max()
-    np.testing.assert_allclose(litert_outputs / max_value, keras_outputs / max_value, atol=0.0001)
+    np.testing.assert_allclose(
+        litert_outputs / max_value, keras_outputs / max_value, atol=testing_utils.QUANT_STEP
+    )
 
     # save the model and make sure the outputs are still the same
     litert_tunner.save_model(keras_model, str(model_path))
@@ -117,7 +123,9 @@ def test__mlp_multiple_layers_with_skip_connections_forward(
 
     # outputs are normalized to -1, 1
     max_value = np.abs(litert_outputs).max()
-    np.testing.assert_allclose(litert_outputs / max_value, keras_outputs / max_value, atol=0.0001)
+    np.testing.assert_allclose(
+        litert_outputs / max_value, keras_outputs / max_value, atol=testing_utils.QUANT_STEP
+    )
 
     # save the model and make sure the outputs are still the same
     litert_tunner.save_model(keras_model, str(model_path))

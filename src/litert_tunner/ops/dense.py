@@ -79,7 +79,10 @@ class QuantizedDense(keras.Layer, types.Writable):
 
     def build(self, input_shape: ShapeLike) -> None:
         """Create the weights (bias, scale, zero_point) for the layer."""
-        # Frozen INT8 weights — stored as float32 for computation
+        # INT8 weights — stored as float32 for computation.
+        # Created as trainable so that the Keras Functional model graph
+        # includes a gradient path. ``prepare_for_finetuning`` freezes
+        # it by default; users opt-in with the ``weight_int8`` pattern.
         self.weight_int8 = self.add_weight(
             name="weight_int8",
             shape=self._weight_int8_data.shape,
@@ -126,6 +129,11 @@ class QuantizedDense(keras.Layer, types.Writable):
 
         super().build(input_shape)
 
+    @property
+    def bias_ste(self) -> TensorLike:
+        """Returns the bias fake-quantized to INT32 using input and weight scales."""
+        return utils.fake_quantize_bias(self.bias, self.input_quant.scale, self.weight_quant.scale)
+
     def call(self, x: TensorLike) -> TensorLike:
         """Forward pass simulating TFLite's quantized FullyConnected.
 
@@ -140,13 +148,17 @@ class QuantizedDense(keras.Layer, types.Writable):
         input_float = self.input_quant.dequantize(x)
 
         # 2. Dequantize weights: float = scale * (int8 - zero_point)
+        # Always apply quantize_to_int8_ste to ensure valid INT8 values.
+        # It's a no-op on already-valid integers but keeps the gradient path.
+        weight_int8 = utils.quantize_to_int8_ste(self.weight_int8)
+
         scale_expanded = utils.expand_dims_if_not_scalar(self.weight_quant.scale, 1)
         zp_expanded = utils.expand_dims_if_not_scalar(self.weight_quant.zero_point, 1)
-        weight_float = utils.dequantize_ste(self.weight_int8, scale_expanded, zp_expanded)
+        weight_float = utils.dequantize_ste(weight_int8, scale_expanded, zp_expanded)
 
         # 3. Matmul + bias (in float32, simulating INT32 accumulation)
         # TFLite FullyConnected: output = input @ weight^T + bias
-        output = ops.matmul(input_float, ops.transpose(weight_float)) + self.bias
+        output = ops.matmul(input_float, ops.transpose(weight_float)) + self.bias_ste
 
         # 4. Apply fused activation (before requantization)
         output = utils.apply_fused_activation(output, self._fused_activation)
@@ -210,6 +222,13 @@ class QuantizedDense(keras.Layer, types.Writable):
             )
             buffer_writes.append(
                 types.BufferWriteOp(tensor_index=op_inputs[2], data=bytes(bias_int32.tobytes()))
+            )
+            quant_writes.append(
+                utils.make_bias_quant_write_op(
+                    tensor_index=op_inputs[2],
+                    input_scale=self.input_quant.scale,
+                    weight_scale=self.weight_quant.scale,
+                )
             )
 
         # Write quantization params

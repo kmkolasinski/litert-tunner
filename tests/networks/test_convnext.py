@@ -43,7 +43,7 @@ def test__make_convnext_tiny_tflite_creates_valid_model(
     testing_utils.assert_allclose_with_mismatch_tolerance(
         litert_outputs / max_value,
         keras_outputs / max_value,
-        atol=0.01,
+        atol=testing_utils.QUANT_STEP,
         max_mismatch_fraction=0.001,
     )
 

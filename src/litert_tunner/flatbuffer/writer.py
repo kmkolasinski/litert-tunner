@@ -156,7 +156,15 @@ def _overwrite_quantization(
     if quant_t is None:
         return
 
-    o_scale = flatbuffers.number_types.UOffsetTFlags.py_type(quant_t._tab.Offset(4))  # noqa: SLF001
+    # In FlatBuffers, vtable field offsets start at 4 and increase by 2 bytes per field.
+    # From schema.fbs: table QuantizationParameters
+    #   min:[float];        // Field 0 -> offset 4 // can be ignored
+    #   max:[float];        // Field 1 -> offset 6 // can be ignored
+    #   scale:[float];      // Field 2 -> offset 8
+    #   zero_point:[long];  // Field 3 -> offset 10
+    #
+    # see: https://github.com/tensorflow/tensorflow/blob/master/tensorflow/compiler/mlir/lite/schema/schema.fbs#L101-L125
+    o_scale = flatbuffers.number_types.UOffsetTFlags.py_type(quant_t._tab.Offset(8))  # noqa: SLF001
     if o_scale != 0:
         offset = quant_t._tab.Vector(o_scale)  # noqa: SLF001
         length = quant_t.ScaleLength()
@@ -166,7 +174,7 @@ def _overwrite_quantization(
         new_data = np.array(write_op.scales, dtype=np.float32).tobytes()
         buf[offset : offset + len(new_data)] = new_data
 
-    o_zp = flatbuffers.number_types.UOffsetTFlags.py_type(quant_t._tab.Offset(6))  # noqa: SLF001
+    o_zp = flatbuffers.number_types.UOffsetTFlags.py_type(quant_t._tab.Offset(10))  # noqa: SLF001
     if o_zp != 0:
         offset = quant_t._tab.Vector(o_zp)  # noqa: SLF001
         length = quant_t.ZeroPointLength()

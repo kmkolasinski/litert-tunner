@@ -221,7 +221,7 @@ class TestDenseTrainableWeights:
         """FULLY_CONNECTED layer must have trainable bias, output_scale, output_zero_point."""
         op, tensors = dense_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
-        op_test_utils.assert_trainable_weight_names(layer, {"bias", "weight_scale"})
+        op_test_utils.assert_trainable_weight_names(layer, {"bias", "weight_scale", "weight_int8"})
 
     def test__non_trainable_weights(self, dense_setup):
         """FULLY_CONNECTED layer must have frozen weights and I/O scales/zps."""
@@ -234,7 +234,6 @@ class TestDenseTrainableWeights:
                 "input_zero_point",
                 "output_scale",
                 "output_zero_point",
-                "weight_int8",
                 "weight_zero_point",
             },
         )
@@ -250,14 +249,14 @@ class TestDenseWriteOps:
         op_test_utils.assert_layer_is_writable(layer)
 
     def test__write_ops_counts(self, dense_setup):
-        """FULLY_CONNECTED must emit 2 buffer writes (weight, bias) and 3 quant writes."""
+        """FULLY_CONNECTED must emit 2 buffer writes (weight, bias) and 4 quant writes."""
         op, tensors = dense_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
         op_test_utils.assert_collect_write_ops(
             layer,
             op,
             expected_buffer_writes=2,
-            expected_quant_writes=3,
+            expected_quant_writes=4,
         )
 
     def test__write_ops_buffer_indices(self, dense_setup):
@@ -270,12 +269,13 @@ class TestDenseWriteOps:
         )
 
     def test__write_ops_quant_indices(self, dense_setup):
-        """Quant writes must target input, weight, and output tensor indices."""
+        """Quant writes must target input, weight, bias, and output tensor indices."""
         op, tensors = dense_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
         _, quant_writes = layer.collect_write_ops(op)
         op_test_utils.assert_quant_write_tensor_indices(
-            quant_writes, {op.input_indices[0], op.input_indices[1], op.output_indices[0]}
+            quant_writes,
+            {op.input_indices[0], op.input_indices[1], op.input_indices[2], op.output_indices[0]},
         )
 
 
@@ -505,3 +505,44 @@ def test__float32_dense_integration(temp_model_dir, run_interpreter):
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
     op_test_utils.verify_model_contains_operator(output_path, "FULLY_CONNECTED")
+
+
+def test__dense_weight_int8_trainable_save_roundtrip(
+    make_dense_tflite: Callable, run_interpreter: Callable
+):
+    """Verify that perturbing trainable weight_int8 saves correctly to tflite.
+
+    Flow: load → make weight_int8 trainable → perturb weights → save →
+    reload → compare Keras output vs Interpreter output.
+    """
+    model_path = make_dense_tflite(
+        num_features=8, num_units=4, use_bias=True, activation=None, float_io=True
+    )
+
+    # Load and make weight_int8 trainable
+    keras_model = litert_tunner.load_model(str(model_path))
+    litert_tunner.prepare_for_finetuning(
+        keras_model, trainable_pattern=r".*(bias|weight_scale|weight_int8)$"
+    )
+
+    # Perturb weight_int8 values slightly (add small float offsets)
+    for v in keras_model.variables:
+        if v.path.endswith("weight_int8"):
+            current = v.numpy()
+            rng = np.random.default_rng(123)
+            perturbation = rng.uniform(-2.0, 2.0, current.shape).astype(np.float32)
+            v.assign(current + perturbation)
+
+    # Generate test inputs
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (2, 8)).astype(np.float32)
+
+    # Get Keras output before save
+    keras_output_before = keras_model.predict(x_train)
+
+    # Save and reload
+    litert_tunner.save_model(keras_model, str(model_path))
+    saved_outputs = run_interpreter(model_path, x_train)
+
+    # Outputs must match: Keras forward (with quantize_to_int8_ste snap) ≈ Interpreter
+    np.testing.assert_allclose(keras_output_before, saved_outputs, atol=1e-3)

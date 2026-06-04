@@ -7,9 +7,10 @@ import numpy as np
 import pytest
 
 import litert_tunner
+from litert_tunner import testing_utils
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
-from tests.conftest import export_quantized_tflite_model
+from tests import conftest
 from tests.ops import op_test_utils
 
 # ---------------------------------------------------------------------------
@@ -161,7 +162,7 @@ class TestConv2DTrainableWeights:
         layer, _ = op_test_utils.build_and_call(
             op, tensors, np.zeros((1, 4, 4, 2), dtype=np.float32)
         )
-        op_test_utils.assert_trainable_weight_names(layer, {"bias", "weight_scale"})
+        op_test_utils.assert_trainable_weight_names(layer, {"bias", "weight_scale", "weight_int8"})
 
     def test__non_trainable_weights(self, conv2d_setup):
         """CONV_2D layer must have frozen weights and I/O scales/zps."""
@@ -176,7 +177,6 @@ class TestConv2DTrainableWeights:
                 "input_zero_point",
                 "output_scale",
                 "output_zero_point",
-                "weight_int8",
                 "weight_zero_point",
             },
         )
@@ -199,7 +199,7 @@ class TestConv2DWriteOps:
         op_test_utils.assert_layer_is_writable(layer)
 
     def test__write_ops_counts(self, conv2d_setup):
-        """CONV_2D must emit 2 buffer writes (weight, bias) and 3 quant writes."""
+        """CONV_2D must emit 2 buffer writes (weight, bias) and 4 quant writes."""
         op, tensors = conv2d_setup
         layer, _ = op_test_utils.build_and_call(
             op, tensors, np.zeros((1, 4, 4, 2), dtype=np.float32)
@@ -208,7 +208,7 @@ class TestConv2DWriteOps:
             layer,
             op,
             expected_buffer_writes=2,
-            expected_quant_writes=3,
+            expected_quant_writes=4,
         )
 
     def test__write_ops_buffer_indices(self, conv2d_setup):
@@ -223,14 +223,15 @@ class TestConv2DWriteOps:
         )
 
     def test__write_ops_quant_indices(self, conv2d_setup):
-        """Quant writes must target input, weight, and output tensor indices."""
+        """Quant writes must target input, weight, bias, and output tensor indices."""
         op, tensors = conv2d_setup
         layer, _ = op_test_utils.build_and_call(
             op, tensors, np.zeros((1, 4, 4, 2), dtype=np.float32)
         )
         _, quant_writes = layer.collect_write_ops(op)
         op_test_utils.assert_quant_write_tensor_indices(
-            quant_writes, {op.input_indices[0], op.input_indices[1], op.output_indices[0]}
+            quant_writes,
+            {op.input_indices[0], op.input_indices[1], op.input_indices[2], op.output_indices[0]},
         )
 
 
@@ -259,7 +260,7 @@ def test__conv2d_float32_io(make_resnet_tflite: Callable, run_interpreter: Calla
 
     keras_model = litert_tunner.load_model(str(model_path))
     keras_outputs = keras_model.predict(x_train)
-    np.testing.assert_allclose(litert_outputs, keras_outputs, atol=1e-3)
+    np.testing.assert_allclose(litert_outputs, keras_outputs, atol=testing_utils.QUANT_STEP)
 
 
 def test__conv2d_save_roundtrip(make_resnet_tflite: Callable, run_interpreter: Callable):
@@ -284,7 +285,7 @@ def test__conv2d_save_roundtrip(make_resnet_tflite: Callable, run_interpreter: C
     litert_tunner.save_model(keras_model, str(model_path))
 
     saved_outputs = run_interpreter(model_path, x_train)
-    np.testing.assert_allclose(litert_outputs, saved_outputs, atol=1e-3)
+    np.testing.assert_allclose(litert_outputs, saved_outputs, atol=testing_utils.QUANT_STEP)
 
 
 def test__conv2d_integration(temp_model_dir, run_interpreter):
@@ -296,7 +297,7 @@ def test__conv2d_integration(temp_model_dir, run_interpreter):
     input_shape = (1, 8, 8, 3)
 
     output_path = temp_model_dir / "conv2d_integration.tflite"
-    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+    conftest.export_quantized_tflite_model(input_shape[1:], model, True, output_path)
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
@@ -304,3 +305,52 @@ def test__conv2d_integration(temp_model_dir, run_interpreter):
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
 
     op_test_utils.verify_model_contains_operator(output_path, "CONV_2D")
+
+
+def test__conv2d_weight_int8_trainable_save_roundtrip(
+    make_resnet_tflite: Callable, run_interpreter: Callable
+):
+    """Verify that perturbing trainable weight_int8 saves correctly to tflite.
+
+    Flow: load → make weight_int8 trainable → perturb weights → save →
+    reload → compare Keras output vs Interpreter output.
+    """
+    model_path = make_resnet_tflite(
+        input_shape=(8, 8, 3),
+        filters=[8],
+        kernel_size=3,
+        use_bias=True,
+        activation=None,
+        float_io=True,
+        add_skip_connections=False,
+        add_batchnorm=False,
+        pooling_type=None,
+    )
+
+    # Load and make weight_int8 trainable
+    keras_model = litert_tunner.load_model(str(model_path))
+    litert_tunner.prepare_for_finetuning(
+        keras_model, trainable_pattern=r".*(bias|weight_scale|weight_int8)$"
+    )
+
+    # Perturb weight_int8 values slightly
+    for v in keras_model.variables:
+        if v.path.endswith("weight_int8"):
+            current = v.numpy()
+            rng = np.random.default_rng(123)
+            perturbation = rng.uniform(-2.0, 2.0, current.shape).astype(np.float32)
+            v.assign(current + perturbation)
+
+    # Generate test inputs
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, (2, 8, 8, 3)).astype(np.float32)
+
+    # Get Keras output before save
+    keras_output_before = keras_model.predict(x_train)
+
+    # Save and reload
+    litert_tunner.save_model(keras_model, str(model_path))
+    saved_outputs = run_interpreter(model_path, x_train)
+
+    # Outputs must match: Keras forward (with quantize_to_int8_ste snap) ≈ Interpreter
+    np.testing.assert_allclose(keras_output_before, saved_outputs, atol=1e-3)

@@ -159,7 +159,8 @@ def prepare_for_finetuning(
     Args:
         model: The Keras model to prepare for fine-tuning.
         trainable_pattern: Regex pattern matching the paths of variables that should
-            remain trainable (e.g., biases and scales).
+            remain trainable. By default matches biases and weight scales. To also
+            train INT8 weights, use ``r".*(bias|weight_scale|weight_int8)$"``.
     """
     total_vars = 0
     trainable_vars = 0

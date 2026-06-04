@@ -245,6 +245,26 @@ def test__fake_quantize():
     np.testing.assert_allclose(_to_numpy(grads), [1.0, 1.0, 1.0, 1.0])
 
 
+def test__fake_quantize_bias():
+    """Verify fake_quantize_bias simulates INT32 bias quantization and passes gradients."""
+    bias = tf.constant([0.15, -0.3, 0.05], dtype=tf.float32)
+    input_scale = 0.5
+    weight_scale = np.array([0.1, 0.2, 0.1])
+    bias_scale = input_scale * weight_scale
+
+    with tf.GradientTape() as tape:
+        tape.watch(bias)
+        y = utils.fake_quantize_bias(bias, input_scale, weight_scale)
+
+    # Replicate forward
+    expected = np.round(_to_numpy(bias) / bias_scale) * bias_scale
+    np.testing.assert_allclose(_to_numpy(y), expected, atol=1e-5)
+
+    grads = tape.gradient(y, bias)
+    # STE grad = 1.0
+    np.testing.assert_allclose(_to_numpy(grads), [1.0, 1.0, 1.0])
+
+
 def test__to_float_list():
     """Verify to_float_list behaves correctly on tensor and scalar."""
     tensor = ops.convert_to_tensor([1.2, 2.8])
@@ -281,3 +301,53 @@ def test__make_quant_write_op():
     assert op.tensor_index == 7
     assert op.scales == pytest.approx([0.1, 0.2])
     assert op.zero_points == [3, 4]
+
+
+def test__make_bias_quant_write_op():
+    """Verify make_bias_quant_write_op formats QuantizationWriteOp correctly for bias tensor."""
+    input_scale = ops.convert_to_tensor(0.5)
+    weight_scale = ops.convert_to_tensor([0.1, 0.2])
+
+    op = utils.make_bias_quant_write_op(
+        tensor_index=8, input_scale=input_scale, weight_scale=weight_scale
+    )
+
+    assert isinstance(op, types.QuantizationWriteOp)
+    assert op.tensor_index == 8
+    assert op.scales == pytest.approx([0.05, 0.1])
+    assert op.zero_points == [0, 0]
+
+
+def test__quantize_to_int8_ste_forward():
+    """Verify quantize_to_int8_ste rounds and clamps to [-128, 127]."""
+    x = ops.convert_to_tensor([1.2, 2.8, -0.6, -130.0, 200.5], dtype="float32")
+    result = _to_numpy(utils.quantize_to_int8_ste(x))
+    expected = np.array([1.0, 3.0, -1.0, -128.0, 127.0], dtype=np.float32)
+    np.testing.assert_allclose(result, expected)
+
+
+def test__quantize_to_int8_ste_gradient():
+    """Verify STE gradients: identity in range, zero outside."""
+    x = tf.constant([0.5, -129.0, 130.0, 42.3], dtype=tf.float32)
+    with tf.GradientTape() as tape:
+        tape.watch(x)
+        y = utils.quantize_to_int8_ste(x)
+
+    grads = _to_numpy(tape.gradient(y, x))
+    # In-range values get gradient 1, out-of-range get 0
+    np.testing.assert_allclose(grads, [1.0, 0.0, 0.0, 1.0])
+
+
+def test__quantize_to_int8_ste_matches_quantize_to_int8():
+    """Verify quantize_to_int8_ste produces same integer values as quantize_to_int8.
+
+    The STE version is the differentiable equivalent of the numpy-based
+    quantize_to_int8. For valid float inputs both must produce identical results.
+    """
+    rng = np.random.default_rng(42)
+    values = rng.uniform(-150.0, 150.0, (100,)).astype(np.float32)
+
+    ste_result = _to_numpy(utils.quantize_to_int8_ste(ops.convert_to_tensor(values)))
+    numpy_result = utils.quantize_to_int8(ops.convert_to_tensor(values)).astype(np.float32)
+
+    np.testing.assert_array_equal(ste_result, numpy_result)

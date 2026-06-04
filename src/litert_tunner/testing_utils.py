@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
+# quantization step for data in [-1, 1], used to make sure output values not differ more than this
+QUANT_STEP = 1 / 127.0
+
 
 def cosine_similarity(y_pred: np.ndarray, y_true: np.ndarray) -> float:
     y_pred_flat = y_pred.reshape(y_pred.shape[0], -1)

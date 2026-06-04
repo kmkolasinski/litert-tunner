@@ -263,6 +263,46 @@ class TestSaveTfliteBiasModification:
 class TestSaveTfliteWeightPreservation:
     """Tests that weight values are correctly preserved/updated during save."""
 
+    def test__modified_bias_and_scales_are_persisted_and_loaded(
+        self,
+        make_dense_tflite: Callable,
+        tmp_path: Path,
+    ):
+        """Modified bias and scales must be exactly the same when loaded back."""
+        model_path = make_dense_tflite(
+            num_features=4, num_units=2, use_bias=True, activation=None, float_io=False
+        )
+        tunner_model = litert_tunner.load_model(str(model_path))
+
+        dense_layer = _find_dense_layer(tunner_model)
+        assert dense_layer is not None
+
+        # Modify bias
+        original_bias = dense_layer.bias.numpy()
+        dense_layer.bias.assign(original_bias + 5.0)
+
+        # Modify weight_scale
+        original_weight_scale_var = dense_layer.weight_quant._scale_var.numpy()
+        dense_layer.weight_quant._scale_var.assign(original_weight_scale_var + 0.5)
+
+        saved_path = tmp_path / "modified_params.tflite"
+        litert_tunner.save_model(tunner_model, str(saved_path))
+
+        # Load again
+        loaded_model = litert_tunner.load_model(str(saved_path))
+        loaded_dense_layer = _find_dense_layer(loaded_model)
+        assert loaded_dense_layer is not None
+
+        # Values should be exactly the same
+        # Compare actual calculated scales (since _scale_var represents inverse softplus)
+        original_scale = np.asarray(keras.ops.convert_to_numpy(dense_layer.weight_quant.scale))
+        loaded_scale = np.asarray(keras.ops.convert_to_numpy(loaded_dense_layer.weight_quant.scale))
+
+        np.testing.assert_allclose(
+            dense_layer.bias.numpy(), loaded_dense_layer.bias.numpy(), rtol=1e-5
+        )
+        np.testing.assert_allclose(original_scale, loaded_scale, rtol=1e-5)
+
     def test__weights_preserved_on_identity_save(
         self,
         make_dense_tflite: Callable,

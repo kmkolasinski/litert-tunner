@@ -20,6 +20,18 @@ FUSED_ACTIVATION_RELU = 1
 FUSED_ACTIVATION_RELU_N1_TO_1 = 2
 FUSED_ACTIVATION_RELU6 = 3
 
+# INT8 range constants
+_INT8_MIN_F = -128.0
+_INT8_MAX_F = 127.0
+
+# Threshold for softplus inverse: above this value, softplus_inverse(x) ≈ x.
+# Chosen to avoid overflow in exp() while maintaining float32 precision.
+_SOFTPLUS_INV_THRESHOLD = 20.0
+INT8_MIN = -128
+INT8_MAX = 127
+
+# Type aliases
+TensorOrScalar = typing.Any
 TensorLike = typing.Any
 
 
@@ -48,7 +60,7 @@ def quantize_to_int8(tensor: TensorLike) -> np.ndarray:
         NumPy array with dtype int8.
     """
     val = typing.cast("np.ndarray", ops.convert_to_numpy(tensor))
-    return np.round(val).astype(np.int8)
+    return np.clip(np.round(val), INT8_MIN, INT8_MAX).astype(np.int8)
 
 
 def quantize_bias_to_int32(
@@ -169,20 +181,6 @@ def apply_fused_activation(x: TensorLike, fused_activation: int) -> TensorLike:
     raise ValueError(msg)
 
 
-# INT8 range constants
-_INT8_MIN_F = -128.0
-_INT8_MAX_F = 127.0
-
-# Threshold for softplus inverse: above this value, softplus_inverse(x) ≈ x.
-# Chosen to avoid overflow in exp() while maintaining float32 precision.
-_SOFTPLUS_INV_THRESHOLD = 20.0
-INT8_MIN = -128
-INT8_MAX = 127
-
-# Type aliases
-TensorOrScalar = typing.Any
-
-
 def quantize_int8(
     x: np.ndarray,
     scale: np.ndarray | float,
@@ -256,6 +254,23 @@ def _round_ste(x: TensorLike) -> TensorLike:
     return x + ops.stop_gradient(ops.round(x) - x)
 
 
+def quantize_to_int8_ste(x: TensorLike) -> TensorLike:
+    """Quantize float values to INT8 range with STE gradients.
+
+    Differentiable equivalent of ``quantize_to_int8``. Rounds to nearest
+    integer and clamps to [-128, 127]. Forward matches ``quantize_to_int8``
+    exactly; backward uses STE (identity gradient, zeroed outside range).
+
+    Args:
+        x: Input tensor with float values representing INT8 weights.
+
+    Returns:
+        Tensor with values rounded and clamped to [-128, 127].
+    """
+    rounded = _round_ste(x)
+    return ops.clip(rounded, _INT8_MIN_F, _INT8_MAX_F)
+
+
 def quantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
     """Quantize float32 → simulated INT8 with STE gradients.
 
@@ -282,6 +297,22 @@ def fake_quantize(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScal
     """Fake quantize: quantize then dequantize with STE gradients."""
     quantized = quantize_ste(x, scale, zero_point)
     return dequantize_ste(quantized, scale, zero_point)
+
+
+def fake_quantize_bias(
+    bias: TensorLike,
+    input_scale: TensorOrScalar,
+    weight_scale: TensorOrScalar,
+) -> TensorLike:
+    """Fake quantize the bias to INT32 using input and weight scales.
+
+    In TFLite, bias is quantized to INT32 with scale = input_scale * weight_scale
+    and zero_point = 0.
+    """
+    bias_scale = input_scale * weight_scale
+    scaled_bias = bias / bias_scale
+    rounded_bias = _round_ste(scaled_bias)
+    return rounded_bias * bias_scale
 
 
 def to_float_list(tensor: TensorOrScalar) -> list[float]:
@@ -331,6 +362,39 @@ def make_quant_write_op(
     """
     scales = to_float_list(scale_tensor)
     zps = to_int_list(zp_tensor)
+    return types.QuantizationWriteOp(
+        tensor_index=tensor_index,
+        scales=scales,
+        zero_points=zps,
+    )
+
+
+def make_bias_quant_write_op(
+    tensor_index: int,
+    input_scale: TensorOrScalar,
+    weight_scale: TensorOrScalar,
+) -> types.QuantizationWriteOp:
+    """Helper to construct a QuantizationWriteOp for an INT32 bias tensor.
+
+    TFLite requires the bias tensor to have a quantization parameter where:
+        bias_scale = input_scale * weight_scale
+        bias_zero_point = 0
+
+    Args:
+        tensor_index: The index of the bias tensor in the flatbuffer.
+        input_scale: The input scale (scalar).
+        weight_scale: The weight scale (scalar or array).
+
+    Returns:
+        A QuantizationWriteOp for the bias tensor.
+    """
+    input_scale_val = float(typing.cast("typing.Any", ops.convert_to_numpy(input_scale)))
+    weight_scale_val = np.asarray(typing.cast("np.ndarray", ops.convert_to_numpy(weight_scale)))
+    bias_scale = input_scale_val * weight_scale_val
+
+    scales = to_float_list(bias_scale)
+    zps = [0] * len(scales)
+
     return types.QuantizationWriteOp(
         tensor_index=tensor_index,
         scales=scales,

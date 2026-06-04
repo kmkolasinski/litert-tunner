@@ -94,7 +94,10 @@ class QuantizedConv2D(keras.Layer, types.Writable):
 
     def build(self, input_shape: ShapeLike) -> None:
         """Create the weights (bias, scale, zero_point) for the layer."""
-        # Frozen INT8 weights — stored as float32 for computation
+        # INT8 weights — stored as float32 for computation.
+        # Created as trainable so that the Keras Functional model graph
+        # includes a gradient path. ``prepare_for_finetuning`` freezes
+        # it by default; users opt-in with the ``weight_int8`` pattern.
         self.weight_int8 = self.add_weight(
             name="weight_int8",
             shape=self._weight_int8_data.shape,
@@ -141,6 +144,11 @@ class QuantizedConv2D(keras.Layer, types.Writable):
 
         super().build(input_shape)
 
+    @property
+    def bias_ste(self) -> TensorLike:
+        """Returns the bias fake-quantized to INT32 using input and weight scales."""
+        return utils.fake_quantize_bias(self.bias, self.input_quant.scale, self.weight_quant.scale)
+
     def call(self, x: TensorLike) -> TensorLike:
         """Forward pass simulating TFLite's quantized Conv2D.
 
@@ -156,12 +164,15 @@ class QuantizedConv2D(keras.Layer, types.Writable):
         # 2. Dequantize weights (per-channel along output channel axis 0)
         # TFLite Conv2D weight shape: (out_ch, kH, kW, in_ch)
         # Scale shape: (out_ch,) → expand to (out_ch, 1, 1, 1)
+        # Always apply quantize_to_int8_ste to ensure valid INT8 values.
+        # It's a no-op on already-valid integers but keeps the gradient path.
+        weight_int8 = utils.quantize_to_int8_ste(self.weight_int8)
         weight_scale = self.weight_quant.scale
         weight_zp = self.weight_quant.zero_point
         if len(weight_scale.shape) > 0:
             weight_scale = ops.reshape(weight_scale, (-1, 1, 1, 1))
             weight_zp = ops.reshape(weight_zp, (-1, 1, 1, 1))
-        weight_float = utils.dequantize_ste(self.weight_int8, weight_scale, weight_zp)
+        weight_float = utils.dequantize_ste(weight_int8, weight_scale, weight_zp)
 
         # 3. Conv2D + bias
         # Keras conv expects kernel shape (kH, kW, in_ch, out_ch) but TFLite stores
@@ -174,7 +185,7 @@ class QuantizedConv2D(keras.Layer, types.Writable):
             padding=self._padding,
             dilation_rate=typing.cast("typing.Any", self._dilation_rate),
         )
-        output = output + self.bias
+        output = output + self.bias_ste
 
         # 4. Apply fused activation (before requantization)
         output = utils.apply_fused_activation(output, self._fused_activation)
@@ -238,6 +249,13 @@ class QuantizedConv2D(keras.Layer, types.Writable):
             )
             buffer_writes.append(
                 types.BufferWriteOp(tensor_index=op_inputs[2], data=bytes(bias_int32.tobytes()))
+            )
+            quant_writes.append(
+                utils.make_bias_quant_write_op(
+                    tensor_index=op_inputs[2],
+                    input_scale=self.input_quant.scale,
+                    weight_scale=self.weight_quant.scale,
+                )
             )
 
         # Write quantization params
