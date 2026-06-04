@@ -162,7 +162,7 @@ class TestConv2DTrainableWeights:
         layer, _ = op_test_utils.build_and_call(
             op, tensors, np.zeros((1, 4, 4, 2), dtype=np.float32)
         )
-        op_test_utils.assert_trainable_weight_names(layer, {"bias", "weight_scale", "weight_int8"})
+        op_test_utils.assert_trainable_weight_names(layer, {"bias", "weight_scale"})
 
     def test__non_trainable_weights(self, conv2d_setup):
         """CONV_2D layer must have frozen weights and I/O scales/zps."""
@@ -178,6 +178,7 @@ class TestConv2DTrainableWeights:
                 "output_scale",
                 "output_zero_point",
                 "weight_zero_point",
+                "weight_int8",
             },
         )
 

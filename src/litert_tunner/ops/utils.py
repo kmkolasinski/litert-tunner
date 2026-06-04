@@ -388,8 +388,8 @@ def make_bias_quant_write_op(
     Returns:
         A QuantizationWriteOp for the bias tensor.
     """
-    input_scale_val = float(typing.cast("typing.Any", ops.convert_to_numpy(input_scale)))
-    weight_scale_val = np.asarray(typing.cast("np.ndarray", ops.convert_to_numpy(weight_scale)))
+    input_scale_val = np.asarray(ops.convert_to_numpy(input_scale), dtype=np.float32)
+    weight_scale_val = np.asarray(ops.convert_to_numpy(weight_scale), dtype=np.float32)
     bias_scale = input_scale_val * weight_scale_val
 
     scales = to_float_list(bias_scale)

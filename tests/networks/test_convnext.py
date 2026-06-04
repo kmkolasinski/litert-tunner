@@ -47,7 +47,14 @@ def test__make_convnext_tiny_tflite_creates_valid_model(
         max_mismatch_fraction=0.001,
     )
 
-    # Save the model and make sure the outputs are still the same
+    # Save the model and make sure the outputs should be closer - note
+    # that due to softplus rounding errors the outputs are slightly different
     litert_tunner.save_model(keras_model, str(model_path))
     litert_saved_outputs = run_interpreter(model_path, x_train)
-    np.testing.assert_allclose(litert_outputs, litert_saved_outputs, atol=1e-5)
+    testing_utils.assert_allclose_with_mismatch_tolerance(
+        litert_outputs / max_value,
+        litert_saved_outputs / max_value,
+        # see softplus_inverse(np.asarray(scale, dtype=np.float32)) in utils.py
+        atol=testing_utils.QUANT_STEP,
+        max_mismatch_fraction=0.001,
+    )

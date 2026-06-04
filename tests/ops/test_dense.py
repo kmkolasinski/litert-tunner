@@ -221,7 +221,7 @@ class TestDenseTrainableWeights:
         """FULLY_CONNECTED layer must have trainable bias, output_scale, output_zero_point."""
         op, tensors = dense_setup
         layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
-        op_test_utils.assert_trainable_weight_names(layer, {"bias", "weight_scale", "weight_int8"})
+        op_test_utils.assert_trainable_weight_names(layer, {"bias", "weight_scale"})
 
     def test__non_trainable_weights(self, dense_setup):
         """FULLY_CONNECTED layer must have frozen weights and I/O scales/zps."""
@@ -235,6 +235,7 @@ class TestDenseTrainableWeights:
                 "output_scale",
                 "output_zero_point",
                 "weight_zero_point",
+                "weight_int8",
             },
         )
 

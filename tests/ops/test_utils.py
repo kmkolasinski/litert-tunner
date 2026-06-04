@@ -182,10 +182,12 @@ def test__round_ste():
 
 def test__softplus_inverse_roundtrip():
     """Verify _softplus_inverse is the true inverse of softplus."""
-    scales = np.array([0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 25.0], dtype=np.float32)
+    scales = np.array(
+        [0.000001, 0.00001, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 25.0, 100.0], dtype=np.float32
+    )
     raw = utils._softplus_inverse(scales)
     recovered = _to_numpy(ops.softplus(ops.convert_to_tensor(raw)))
-    np.testing.assert_allclose(recovered, scales, rtol=1e-5)
+    np.testing.assert_allclose(recovered, scales, rtol=1e-6)
 
 
 def test__quantize_ste():
