@@ -7,7 +7,7 @@ from litert_tunner.testing_utils import (
     assert_allclose_with_mismatch_tolerance,
     assert_cosine_similarity,
 )
-from litert_tunner.trainer import Trainer, prepare_for_finetuning
+from litert_tunner.trainer import Trainer, cosine_similarity, prepare_for_finetuning
 
 __version__ = "0.1.0"
 
@@ -39,6 +39,7 @@ __all__ = [
     "Trainer",
     "assert_allclose_with_mismatch_tolerance",
     "assert_cosine_similarity",
+    "cosine_similarity",
     "load_model",
     "prepare_for_finetuning",
     "save_model",

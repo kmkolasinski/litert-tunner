@@ -1,6 +1,6 @@
 import re
 from collections.abc import Callable, Mapping
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, cast
 
 import keras
 import numpy as np
@@ -21,7 +21,7 @@ class Trainer(keras.Model):
     """Generic fine-tuning distillation trainer for quantized models.
 
     This trainer computes a distillation loss between a base model (teacher) and
-    a LiteRT tunner model (student), along with an L2 weight drift loss to prevent
+    a LiteRT Tunner model (student), along with an L2 weight drift loss to prevent
     the fine-tuned parameters from diverging too much from their original values.
 
     The model expects a dataset yielding `x` (or `(x, y)` where `y` is ignored for
@@ -203,3 +203,23 @@ def prepare_for_finetuning(
         total_params,
         (trainable_params / total_params * 100.0) if total_params > 0 else 0.0,
     )
+
+
+def cosine_similarity(y_pred: keras.KerasTensor, y_true: keras.KerasTensor) -> keras.KerasTensor:
+    """Computes the cosine similarity between the predicted and true outputs.
+
+    Args:
+        y_pred: The predicted outputs, of shape (batch_size, ...).
+        y_true: The true outputs, of shape (batch_size, ...).
+
+    Returns:
+        The cosine similarity between the predicted and true outputs.
+    """
+    y_pred_flat = keras.ops.reshape(y_pred, (keras.ops.shape(y_pred)[0], -1))
+    y_true_flat = keras.ops.reshape(y_true, (keras.ops.shape(y_true)[0], -1))
+
+    pred_norm = keras.ops.normalize(y_pred_flat, axis=-1)
+    true_norm = keras.ops.normalize(y_true_flat, axis=-1)
+
+    cosine_sim = keras.ops.mean(keras.ops.sum(pred_norm * true_norm, axis=-1))
+    return cast("keras.KerasTensor", cosine_sim)

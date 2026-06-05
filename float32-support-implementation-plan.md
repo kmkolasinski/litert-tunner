@@ -51,14 +51,14 @@ There are 3 categories of ops. Each has different requirements:
 These ops store weight data in the flatbuffer and need `Writable` to save
 updated weights back.
 
-| Aspect            | Quantized layer                                            | Float32 layer                                                        |
-| ----------------- | ---------------------------------------------------------- | -------------------------------------------------------------------- |
-| **`__init__`**    | Stores INT8 weights, quant params                          | Stores float32 kernel + bias                                         |
-| **`build`**       | `add_weight` for INT8 weights + QuantizationVars           | `add_weight` for kernel (trainable) + bias (trainable)               |
-| **`call`**        | dequant → compute → fused activation → quant               | compute → fused activation (no quant)                                |
-| **`Writable`**    | Yes — emits `BufferWriteOp` (INT8) + `QuantizationWriteOp` | Yes — emits `BufferWriteOp` (float32) only, no `QuantizationWriteOp` |
-| **Trainable**     | bias, weight_scale                                         | kernel, bias                                                         |
-| **Non-trainable** | weight_int8, input/output/weight quant vars                | (none)                                                               |
+| Aspect            | Quantized layer                                            | Float32 layer                                                               |
+| ----------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **`__init__`**    | Stores INT8 weights, quant params                          | Stores float32 kernel + bias + their original dtypes                        |
+| **`build`**       | `add_weight` for INT8 weights + QuantizationVars           | `add_weight` for kernel (trainable) + bias (trainable)                      |
+| **`call`**        | dequant → compute → fused activation → quant               | compute → fused activation (no quant)                                       |
+| **`Writable`**    | Yes — emits `BufferWriteOp` (INT8) + `QuantizationWriteOp` | Yes — emits `BufferWriteOp` (original dtype) only, no `QuantizationWriteOp` |
+| **Trainable**     | bias, weight_scale                                         | kernel, bias                                                                |
+| **Non-trainable** | weight_int8, input/output/weight quant vars                | (none)                                                                      |
 
 **Builder changes**:
 
@@ -74,21 +74,21 @@ updated weights back.
 ```python
 def collect_write_ops(self, op):
     buffer_writes = []
-    op_inputs = typing.cast("typing.Any", op.input_indices)
+    op_inputs = op.input_indices
 
-    # Write float32 kernel
+    # Write kernel with original dtype
     kernel_np = typing.cast("np.ndarray", ops.convert_to_numpy(self.kernel)).astype(
-        np.float32
+        self._kernel_dtype
     )
     buffer_writes.append(
         types.BufferWriteOp(tensor_index=op_inputs[1], data=bytes(kernel_np.tobytes()))
     )
 
-    # Write float32 bias (if present)
+    # Write bias (if present) with original dtype
     bias_index = 2
     if len(op_inputs) > bias_index and op_inputs[bias_index] >= 0:
         bias_np = typing.cast("np.ndarray", ops.convert_to_numpy(self.bias)).astype(
-            np.float32
+            self._bias_dtype
         )
         buffer_writes.append(
             types.BufferWriteOp(
@@ -197,15 +197,16 @@ In `src/litert_tunner/ops/<op>.py`, add a new class after the existing
 - **Class declaration**: `class Float<Op>(keras.Layer):` for ops without
   persistent weights, or `class Float<Op>(keras.Layer, types.Writable):` for
   weighted ops
-- **`__init__`**: Accept only float32 data + op-specific options (padding,
+- **`__init__`**: Accept float32 data + original dtypes (for float16 support) + op-specific options (padding,
   strides, etc.). No quant params.
 - **`build`**: Create `add_weight` for any data that needs to be persisted
   (kernel, bias, constant inputs). All are trainable unless constant.
 - **`call`**: The core computation — same as the quantized version but without
   the dequant/quant wrapping. Just the raw float32 math.
-- **`get_config`**: Return serialization config (op-specific options only).
-- **`collect_write_ops`** (only for `Writable` layers): Emit `BufferWriteOp`
-  with float32 bytes. Return empty list for `QuantizationWriteOp`.
+- **`get_config`**: Return serialization config (op-specific options + dtypes).
+- **`collect_write_ops`** (only for `Writable` layers): Cast weights back to their
+  original dtypes (e.g. `self._kernel_dtype`), emit `BufferWriteOp` with those bytes.
+  Return empty list for `QuantizationWriteOp`.
 
 ### Step 2: Refactor the Builder Function
 
@@ -223,6 +224,8 @@ def build_op(op, tensors):
         return _build_quantized_op(op, tensors)
     return _build_float_op(op, tensors)
 ```
+
+- In `_build_float_<op>()`, remember to extract `bias_dtype` (if applicable) and pass the original `weight_tensor.dtype` and `bias_dtype` into the `Float<Op>` constructor.
 
 - In private builders, add type narrowing for `weight_tensor.data`:
   `assert weight_tensor.data is not None  # noqa: S101`

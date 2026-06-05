@@ -104,7 +104,7 @@ class QuantizedConv2D(keras.Layer, types.Writable):
             initializer=keras.initializers.Constant(
                 typing.cast("float", self._weight_int8_data.astype(np.float32))
             ),
-            trainable=False,
+            trainable=True,
         )
 
         # Trainable float32 bias

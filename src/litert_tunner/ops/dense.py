@@ -89,7 +89,7 @@ class QuantizedDense(keras.Layer, types.Writable):
             initializer=keras.initializers.Constant(
                 typing.cast("float", self._weight_int8_data.astype(np.float32))
             ),
-            trainable=False,
+            trainable=True,
         )
 
         # Trainable float32 bias
@@ -242,7 +242,7 @@ class QuantizedDense(keras.Layer, types.Writable):
 
 
 class FloatDense(keras.Layer, types.Writable):
-    """Float32 TFLite FullyConnected op as a Keras layer.
+    """Float32/Float16 TFLite FullyConnected op as a Keras layer.
 
     The forward pass performs a simple matmul + bias with an optional fused
     activation. No quantization/dequantization is involved.
@@ -250,9 +250,11 @@ class FloatDense(keras.Layer, types.Writable):
     All weights (kernel and bias) are trainable by default.
 
     Args:
-        kernel_data: Float32 weight values, shape (out_units, in_features).
-        bias_data: Float32 bias values, shape (out_units,).
+        kernel_data: Float32/Float16 weight values, shape (out_units, in_features).
+        bias_data: Float32/Float16 bias values, shape (out_units,).
         fused_activation: TFLite fused activation code (0=none, 1=relu, 3=relu6).
+        kernel_dtype: Original data type of the kernel in the flatbuffer.
+        bias_dtype: Original data type of the bias in the flatbuffer.
         name: Layer name.
     """
 
@@ -261,12 +263,16 @@ class FloatDense(keras.Layer, types.Writable):
         kernel_data: np.ndarray,
         bias_data: np.ndarray,
         fused_activation: int = utils.FUSED_ACTIVATION_NONE,
+        kernel_dtype: str = types.DTYPE_FLOAT32,
+        bias_dtype: str = types.DTYPE_FLOAT32,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._kernel_data = kernel_data.astype(np.float32)
         self._bias_data = bias_data.astype(np.float32)
         self._fused_activation = fused_activation
+        self._kernel_dtype = kernel_dtype
+        self._bias_dtype = bias_dtype
 
     def build(self, input_shape: ShapeLike) -> None:
         """Create trainable kernel and bias weights."""
@@ -300,7 +306,11 @@ class FloatDense(keras.Layer, types.Writable):
     def get_config(self):
         """Return the configuration dictionary for serialization of the layer."""
         config = super().get_config()
-        config.update({"fused_activation": self._fused_activation})
+        config.update({
+            "fused_activation": self._fused_activation,
+            "kernel_dtype": self._kernel_dtype,
+            "bias_dtype": self._bias_dtype,
+        })
         return config
 
     def collect_write_ops(
@@ -320,10 +330,12 @@ class FloatDense(keras.Layer, types.Writable):
         """
         buffer_writes: list[types.BufferWriteOp] = []
 
-        op_inputs = typing.cast("typing.Any", op.input_indices)
+        op_inputs = op.input_indices
 
-        # Write float32 kernel
-        kernel_np = typing.cast("np.ndarray", ops.convert_to_numpy(self.kernel)).astype(np.float32)
+        # Write kernel with original dtype
+        kernel_np = typing.cast("np.ndarray", ops.convert_to_numpy(self.kernel)).astype(
+            self._kernel_dtype
+        )
         buffer_writes.append(
             types.BufferWriteOp(
                 tensor_index=op_inputs[1],
@@ -331,10 +343,12 @@ class FloatDense(keras.Layer, types.Writable):
             )
         )
 
-        # Write float32 bias (if present)
+        # Write bias (if present) with original dtype
         bias_index = 2
         if len(op_inputs) > bias_index and op_inputs[bias_index] >= 0:
-            bias_np = typing.cast("np.ndarray", ops.convert_to_numpy(self.bias)).astype(np.float32)
+            bias_np = typing.cast("np.ndarray", ops.convert_to_numpy(self.bias)).astype(
+                self._bias_dtype
+            )
             buffer_writes.append(
                 types.BufferWriteOp(
                     tensor_index=op_inputs[2],
@@ -450,9 +464,17 @@ def _build_float_dense(
 
     fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
 
+    # Determine original dtypes for proper saving
+    bias_index = 2
+    bias_dtype = types.DTYPE_FLOAT32
+    if len(op.input_indices) > bias_index and op.input_indices[bias_index] >= 0:
+        bias_dtype = tensors[op.input_indices[bias_index]].dtype
+
     return FloatDense(
         kernel_data=weight_tensor.data,
         bias_data=bias_float,
         fused_activation=fused_activation,
+        kernel_dtype=weight_tensor.dtype,
+        bias_dtype=bias_dtype,
         name=f"float_dense_{op.output_indices[0]}",
     )
