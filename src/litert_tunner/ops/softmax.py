@@ -97,8 +97,32 @@ class QuantizedSoftmax(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("SOFTMAX")
-def build_softmax(
+class FloatSoftmax(keras.Layer):
+    """Simulates TFLite's float32 SOFTMAX op.
+
+    The forward pass performs:
+        1. Apply softmax along the specified axis
+
+    This layer has no persistent weights to write back and emits no write ops.
+    """
+
+    def __init__(self, axis: int = -1, **kwargs):
+        super().__init__(**kwargs)
+        self._axis = axis
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Forward pass for float32 SOFTMAX."""
+        return ops.softmax(x, axis=self._axis)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "axis": self._axis,
+        })
+        return config
+
+
+def _build_quantized_softmax(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
@@ -123,3 +147,25 @@ def build_softmax(
         axis=-1,
         name=f"quantized_softmax_{op.output_indices[0]}",
     )
+
+
+def _build_float_softmax(
+    op: types.OperatorInfo,
+) -> keras.Layer:
+    """Build a FloatSoftmax layer from parsed TFLite operator info."""
+    return FloatSoftmax(
+        axis=-1,
+        name=f"float_softmax_{op.output_indices[0]}",
+    )
+
+
+@registry.register_op("SOFTMAX")
+def build_softmax(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a SOFTMAX layer from parsed TFLite operator info."""
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_softmax(op, tensors)
+    return _build_float_softmax(op)

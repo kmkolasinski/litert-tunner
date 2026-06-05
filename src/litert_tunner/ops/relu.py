@@ -89,8 +89,21 @@ class QuantizedRelu(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("RELU")
-def build_relu(
+class FloatRelu(keras.Layer):
+    """Simulates TFLite's float32 RELU op.
+
+    The forward pass performs:
+        1. Apply ReLU activation
+
+    This layer has no persistent weights to write back and emits no write ops.
+    """
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Forward pass for float32 RELU."""
+        return ops.relu(x)
+
+
+def _build_quantized_relu(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
@@ -112,3 +125,24 @@ def build_relu(
         output_zero_point=float(output_quant.zero_points[0]),
         name=f"quantized_relu_{op.output_indices[0]}",
     )
+
+
+def _build_float_relu(
+    op: types.OperatorInfo,
+) -> keras.Layer:
+    """Build a FloatRelu layer from parsed TFLite operator info."""
+    return FloatRelu(
+        name=f"float_relu_{op.output_indices[0]}",
+    )
+
+
+@registry.register_op("RELU")
+def build_relu(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a RELU layer from parsed TFLite operator info."""
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_relu(op, tensors)
+    return _build_float_relu(op)

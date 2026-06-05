@@ -6,8 +6,28 @@ import pytest
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
-from tests.conftest import export_quantized_tflite_model
+from tests import conftest
 from tests.ops import op_test_utils
+
+
+@pytest.fixture
+def float_softmax_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a minimal SOFTMAX op with float32 I/O (no quantization)."""
+    input_tensor = op_test_utils.make_tensor(
+        name="input_f32", index=0, shape=(1, 4), dtype=types.DTYPE_FLOAT32, quantization=None
+    )
+
+    output_tensor = op_test_utils.make_tensor(
+        name="output_f32", index=1, shape=(1, 4), dtype=types.DTYPE_FLOAT32, quantization=None
+    )
+
+    tensors = (input_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="SOFTMAX",
+        input_indices=(0,),
+        output_indices=(1,),
+    )
+    return op, tensors
 
 
 @pytest.fixture
@@ -123,6 +143,60 @@ class TestSoftmaxWriteOps:
         )
 
 
+class TestFloatSoftmaxBuild:
+    def test__float_softmax_build_returns_keras_layer(self, float_softmax_setup):
+        op, tensors = float_softmax_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        assert isinstance(layer, keras.Layer)
+
+    def test__float_softmax_layer_name_contains_output_index(self, float_softmax_setup):
+        op, tensors = float_softmax_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        output_idx = op.output_indices[0]
+        assert layer.name.endswith(f"_{output_idx}")
+
+
+class TestFloatSoftmaxCall:
+    def test__float_softmax_output_shape(self, float_softmax_setup):
+        op, tensors = float_softmax_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_output_shape(output, (1, 4))
+
+    def test__float_softmax_formula_matches_numpy(self, float_softmax_setup):
+        op, tensors = float_softmax_setup
+        input_data = np.array([[-2, 1, 0, 3]], dtype=np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+
+        # Calculate expected softmax
+        exp_x = np.exp(input_data - np.max(input_data, axis=-1, keepdims=True))
+        expected = exp_x / np.sum(exp_x, axis=-1, keepdims=True)
+        np.testing.assert_allclose(output, expected, atol=1e-5)
+
+
+class TestFloatSoftmaxTrainableWeights:
+    def test__float_softmax_trainable_weights(self, float_softmax_setup):
+        op, tensors = float_softmax_setup
+        input_data = np.zeros((1, 4), dtype=np.float32)
+        layer, _ = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_trainable_weight_names(layer, set())
+
+    def test__float_softmax_non_trainable_weights(self, float_softmax_setup):
+        op, tensors = float_softmax_setup
+        input_data = np.zeros((1, 4), dtype=np.float32)
+        layer, _ = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_non_trainable_weight_names(layer, set())
+
+
+class TestFloatSoftmaxWriteOps:
+    def test__float_softmax_not_writable(self, float_softmax_setup):
+        op, tensors = float_softmax_setup
+        input_data = np.zeros((1, 4), dtype=np.float32)
+        layer, _ = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_layer_not_writable(layer)
+
+
 def test__softmax_integration(temp_model_dir, run_interpreter):
     """Integration test: build a Keras model that produces a TFLite SOFTMAX op."""
     keras.utils.set_random_seed(42)
@@ -134,7 +208,28 @@ def test__softmax_integration(temp_model_dir, run_interpreter):
     input_shape = (1, 4)
 
     output_path = temp_model_dir / "softmax_integration.tflite"
-    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+    conftest.export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
+
+    op_test_utils.verify_model_contains_operator(output_path, "SOFTMAX")
+
+
+def test__float32_softmax_integration(temp_model_dir, run_interpreter):
+    """Integration test: build a Keras model that produces a float32 TFLite SOFTMAX op."""
+    keras.utils.set_random_seed(42)
+
+    inputs = keras.Input(shape=(4,))
+    x = keras.layers.Dense(8)(inputs)
+    outputs = keras.layers.Softmax()(x)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    input_shape = (1, 4)
+
+    output_path = temp_model_dir / "float32_softmax_integration.tflite"
+    conftest.export_float32_tflite_model(input_shape[1:], model, output_path)
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)

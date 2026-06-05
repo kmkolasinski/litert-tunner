@@ -449,15 +449,15 @@ ______________________________________________________________________
 
 ### Category C: Unary / activation / reduction ops
 
-- [ ] `RELU`
-- [ ] `GELU`
+- [x] `RELU`
+- [x] `GELU`
 - [x] `LOGISTIC`
-- [ ] `SOFTMAX`
+- [x] `SOFTMAX`
 - [x] `MEAN`
 - [x] `CONCATENATION`
 - [ ] `NEG`
-- [ ] `RSQRT`
-- [ ] `SQUARED_DIFFERENCE`
+- [x] `RSQRT`
+- [x] `SQUARED_DIFFERENCE`
 - [ ] `RESIZE_NEAREST_NEIGHBOR`
 - [ ] `AVERAGE_POOL_2D` (if it exists as separate from pooling passthrough)
 

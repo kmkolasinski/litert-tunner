@@ -9,8 +9,32 @@ import tensorflow as tf
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
-from tests.conftest import export_quantized_tflite_model
+from tests import conftest
 from tests.ops import op_test_utils
+
+
+@pytest.fixture
+def float_sd_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a minimal SQUARED_DIFFERENCE op with float32 I/O (no quantization)."""
+    input1_tensor = op_test_utils.make_tensor(
+        name="input1_f32", index=0, shape=(1, 4), dtype=types.DTYPE_FLOAT32, quantization=None
+    )
+
+    input2_tensor = op_test_utils.make_tensor(
+        name="input2_f32", index=1, shape=(1, 4), dtype=types.DTYPE_FLOAT32, quantization=None
+    )
+
+    output_tensor = op_test_utils.make_tensor(
+        name="output_f32", index=2, shape=(1, 4), dtype=types.DTYPE_FLOAT32, quantization=None
+    )
+
+    tensors = (input1_tensor, input2_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="SQUARED_DIFFERENCE",
+        input_indices=(0, 1),
+        output_indices=(2,),
+    )
+    return op, tensors
 
 
 @pytest.fixture
@@ -152,6 +176,62 @@ class TestSquaredDifferenceWriteOps:
         )
 
 
+class TestFloatSquaredDifferenceBuild:
+    def test__float_squared_difference_build_returns_keras_layer(self, float_sd_setup):
+        op, tensors = float_sd_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        assert isinstance(layer, keras.Layer)
+
+    def test__float_squared_difference_layer_name_contains_output_index(self, float_sd_setup):
+        op, tensors = float_sd_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        output_idx = op.output_indices[0]
+        assert layer.name.endswith(f"_{output_idx}")
+
+
+class TestFloatSquaredDifferenceCall:
+    def test__float_squared_difference_output_shape(self, float_sd_setup):
+        op, tensors = float_sd_setup
+        rng = np.random.default_rng(42)
+        input_data = [
+            rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32),
+            rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32),
+        ]
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_output_shape(output, (1, 4))
+
+    def test__float_squared_difference_formula_matches_numpy(self, float_sd_setup):
+        op, tensors = float_sd_setup
+        input1_data = np.array([[-5, 5, -15, 15]], dtype=np.float32)
+        input2_data = np.array([[0, 5, 0, 10]], dtype=np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, [input1_data, input2_data])
+
+        expected = np.square(input1_data - input2_data)
+        np.testing.assert_allclose(output, expected, atol=1e-5)
+
+
+class TestFloatSquaredDifferenceTrainableWeights:
+    def test__float_squared_difference_trainable_weights(self, float_sd_setup):
+        op, tensors = float_sd_setup
+        inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
+        layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
+        op_test_utils.assert_trainable_weight_names(layer, set())
+
+    def test__float_squared_difference_non_trainable_weights(self, float_sd_setup):
+        op, tensors = float_sd_setup
+        inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
+        layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
+        op_test_utils.assert_non_trainable_weight_names(layer, set())
+
+
+class TestFloatSquaredDifferenceWriteOps:
+    def test__float_squared_difference_not_writable(self, float_sd_setup):
+        op, tensors = float_sd_setup
+        inputs = [np.zeros((1, 4), dtype=np.float32), np.zeros((1, 4), dtype=np.float32)]
+        layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
+        op_test_utils.assert_layer_not_writable(layer)
+
+
 def test__squared_difference_integration(temp_model_dir, run_interpreter):
     keras.utils.set_random_seed(42)
 
@@ -164,7 +244,29 @@ def test__squared_difference_integration(temp_model_dir, run_interpreter):
     input_shape = (1, 4)
 
     output_path = temp_model_dir / "squared_difference_integration.tflite"
-    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+    conftest.export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
+
+    op_test_utils.verify_model_contains_operator(output_path, "SQUARED_DIFFERENCE")
+
+
+def test__float32_squared_difference_integration(temp_model_dir, run_interpreter):
+    keras.utils.set_random_seed(42)
+
+    inputs = keras.Input(shape=(4,))
+    x = keras.layers.Dense(4)(inputs)
+    y = keras.layers.Dense(4)(inputs)
+    # Using tf operation to ensure it maps to SquaredDifference
+    outputs = keras.layers.Lambda(lambda args: tf.math.squared_difference(args[0], args[1]))([x, y])
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    input_shape = (1, 4)
+
+    output_path = temp_model_dir / "float32_squared_difference_integration.tflite"
+    conftest.export_float32_tflite_model(input_shape[1:], model, output_path)
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)

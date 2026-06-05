@@ -89,8 +89,21 @@ class QuantizedRsqrt(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("RSQRT")
-def build_rsqrt(
+class FloatRsqrt(keras.Layer):
+    """Simulates TFLite's float32 RSQRT op.
+
+    The forward pass performs:
+        1. Apply reciprocal square root: 1 / sqrt(input)
+
+    This layer has no persistent weights to write back and emits no write ops.
+    """
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Forward pass for float32 RSQRT."""
+        return ops.rsqrt(x)
+
+
+def _build_quantized_rsqrt(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
@@ -112,3 +125,24 @@ def build_rsqrt(
         output_zero_point=float(output_quant.zero_points[0]),
         name=f"quantized_rsqrt_{op.output_indices[0]}",
     )
+
+
+def _build_float_rsqrt(
+    op: types.OperatorInfo,
+) -> keras.Layer:
+    """Build a FloatRsqrt layer from parsed TFLite operator info."""
+    return FloatRsqrt(
+        name=f"float_rsqrt_{op.output_indices[0]}",
+    )
+
+
+@registry.register_op("RSQRT")
+def build_rsqrt(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a RSQRT layer from parsed TFLite operator info."""
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_rsqrt(op, tensors)
+    return _build_float_rsqrt(op)

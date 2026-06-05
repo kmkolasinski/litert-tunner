@@ -133,8 +133,65 @@ class QuantizedSquaredDifference(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("SQUARED_DIFFERENCE")
-def build_squared_difference(
+class FloatSquaredDifference(keras.Layer):
+    """Simulates TFLite's float32 SQUARED_DIFFERENCE op.
+
+    The forward pass performs:
+        1. Compute squared difference: (input1 - input2) ** 2
+
+    This layer has no persistent weights to write back and emits no write ops.
+    """
+
+    def __init__(
+        self,
+        constant_input: np.ndarray | None = None,
+        constant_input_index: int = -1,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._constant_input_data = constant_input
+        self._constant_input_index = constant_input_index
+
+    def build(self, input_shape: ShapeLike) -> None:
+        if self._constant_input_data is not None:
+            self.constant_input = self.add_weight(
+                name="constant_input",
+                shape=self._constant_input_data.shape,
+                initializer=keras.initializers.Constant(
+                    typing.cast("float", self._constant_input_data.astype(np.float32))
+                ),
+                trainable=False,
+            )
+        super().build(input_shape)
+
+    def call(
+        self, inputs: TensorLike | tuple[TensorLike, TensorLike] | list[TensorLike]
+    ) -> TensorLike:
+        """Forward pass for float32 SQUARED_DIFFERENCE."""
+        if self._constant_input_data is not None:
+            dynamic_input = inputs
+            if self._constant_input_index == 0:
+                x1, x2 = self.constant_input, dynamic_input
+            else:
+                x1, x2 = dynamic_input, self.constant_input
+        else:
+            x1, x2 = inputs
+
+        return ops.square(ops.subtract(x1, x2))
+
+
+def _extract_float_constant(
+    input1_tensor: types.TensorInfo,
+    input2_tensor: types.TensorInfo,
+) -> tuple[np.ndarray | None, int]:
+    """Extract a constant float32 input tensor."""
+    for idx, tensor in enumerate([input1_tensor, input2_tensor]):
+        if tensor.data is not None:
+            return tensor.data.astype(np.float32), idx
+    return None, -1
+
+
+def _build_quantized_squared_difference(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
@@ -167,3 +224,32 @@ def build_squared_difference(
         constant_input_index=constant_input_index,
         name=f"quantized_squared_difference_{op.output_indices[0]}",
     )
+
+
+def _build_float_squared_difference(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a FloatSquaredDifference layer from parsed TFLite operator info."""
+    input1_tensor = tensors[op.input_indices[0]]
+    input2_tensor = tensors[op.input_indices[1]]
+
+    constant_input, constant_input_index = _extract_float_constant(input1_tensor, input2_tensor)
+
+    return FloatSquaredDifference(
+        constant_input=constant_input,
+        constant_input_index=constant_input_index,
+        name=f"float_squared_difference_{op.output_indices[0]}",
+    )
+
+
+@registry.register_op("SQUARED_DIFFERENCE")
+def build_squared_difference(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a SQUARED_DIFFERENCE layer from parsed TFLite operator info."""
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_squared_difference(op, tensors)
+    return _build_float_squared_difference(op, tensors)

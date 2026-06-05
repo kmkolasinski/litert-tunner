@@ -93,8 +93,32 @@ class QuantizedGelu(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("GELU")
-def build_gelu(
+class FloatGelu(keras.Layer):
+    """Simulates TFLite's float32 GELU op.
+
+    The forward pass performs:
+        1. Apply GELU activation
+
+    This layer has no persistent weights to write back and emits no write ops.
+    """
+
+    def __init__(self, *, approximate: bool = False, **kwargs):
+        super().__init__(**kwargs)
+        self._approximate = approximate
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Forward pass for float32 GELU."""
+        return ops.gelu(x, approximate=self._approximate)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "approximate": self._approximate,
+        })
+        return config
+
+
+def _build_quantized_gelu(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
@@ -120,3 +144,26 @@ def build_gelu(
         approximate=approximate,
         name=f"quantized_gelu_{op.output_indices[0]}",
     )
+
+
+def _build_float_gelu(
+    op: types.OperatorInfo,
+) -> keras.Layer:
+    """Build a FloatGelu layer from parsed TFLite operator info."""
+    approximate = op.options.get("Approximate", False)
+    return FloatGelu(
+        approximate=approximate,
+        name=f"float_gelu_{op.output_indices[0]}",
+    )
+
+
+@registry.register_op("GELU")
+def build_gelu(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a GELU layer from parsed TFLite operator info."""
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_gelu(op, tensors)
+    return _build_float_gelu(op)
