@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 
 import litert_tunner
 from litert_tunner import testing_utils
@@ -13,9 +14,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+@pytest.mark.parametrize("optimization", ["int8", "float32"])
 def test__make_convnext_tiny_tflite_creates_valid_model(
     make_backbone_tflite: Callable,
     run_interpreter: Callable,
+    optimization: str,
 ) -> None:
     """Verify that make_backbone_tflite creates a valid, executable ConvNeXtTiny TFLite model."""
     input_shape = (96, 96, 3)
@@ -26,6 +29,7 @@ def test__make_convnext_tiny_tflite_creates_valid_model(
         num_outputs=1000,
         float_io=True,
         backbone_name="ConvNeXtTiny",
+        optimization=optimization,
     )
 
     rng = np.random.default_rng(42)
