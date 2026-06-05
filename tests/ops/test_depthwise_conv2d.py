@@ -14,7 +14,7 @@ import pytest
 import litert_tunner
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
-from tests.conftest import export_quantized_tflite_model
+from tests import conftest
 from tests.ops import op_test_utils
 
 # ---------------------------------------------------------------------------
@@ -65,6 +65,51 @@ def depthwise_conv2d_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo
         shape=(1, 4, 4, 2),
         dtype=types.DTYPE_INT8,
         quantization=output_quant,
+    )
+
+    tensors = (input_tensor, weight_tensor, bias_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="DEPTHWISE_CONV_2D",
+        input_indices=(0, 1, 2),
+        output_indices=(3,),
+        options={"Padding": 0, "StrideH": 1, "StrideW": 1, "DepthMultiplier": 1},
+    )
+    return op, tensors
+
+
+@pytest.fixture
+def float_depthwise_conv2d_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a minimal DEPTHWISE_CONV_2D op with float32 I/O (no quantization)."""
+    input_tensor = op_test_utils.make_tensor(
+        name="input_f32",
+        index=0,
+        shape=(1, 4, 4, 2),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+    )
+
+    rng = np.random.default_rng(42)
+    weight_data = rng.uniform(-1.0, 1.0, (1, 3, 3, 2)).astype(np.float32)
+    weight_tensor = op_test_utils.make_tensor(
+        name="weight_f32",
+        index=1,
+        shape=(1, 3, 3, 2),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+        data=weight_data,
+    )
+
+    bias_data = np.array([0.5, -0.5], dtype=np.float32)
+    bias_tensor = op_test_utils.make_tensor(
+        name="bias_f32", index=2, shape=(2,), dtype=types.DTYPE_FLOAT32, data=bias_data
+    )
+
+    output_tensor = op_test_utils.make_tensor(
+        name="output_f32",
+        index=3,
+        shape=(1, 4, 4, 2),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
     )
 
     tensors = (input_tensor, weight_tensor, bias_tensor, output_tensor)
@@ -234,6 +279,124 @@ class TestDepthwiseConv2DWriteOps:
 
 
 # ===================================================================
+# FLOAT32 DEPTHWISE_CONV_2D tests
+# ===================================================================
+
+
+class TestFloatDepthwiseConv2DBuild:
+    def test__float_depthwise_conv2d_build_returns_keras_layer(self, float_depthwise_conv2d_setup):
+        """Builder must return a Keras layer for float32 inputs."""
+        op, tensors = float_depthwise_conv2d_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        assert isinstance(layer, keras.Layer)
+
+    def test__float_depthwise_conv2d_layer_name_contains_output_index(
+        self, float_depthwise_conv2d_setup
+    ):
+        """Layer name must end with output tensor index."""
+        op, tensors = float_depthwise_conv2d_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        output_idx = op.output_indices[0]
+        assert layer.name.endswith(f"_{output_idx}")
+
+    def test__float_depthwise_conv2d_build_raises_without_weights(
+        self, float_depthwise_conv2d_setup
+    ):
+        """Builder must raise if weight tensor has no data."""
+        op, tensors = float_depthwise_conv2d_setup
+        tensors_list = list(tensors)
+        tensors_list[1] = op_test_utils.make_tensor(
+            name="weight_f32",
+            index=1,
+            shape=(1, 3, 3, 2),
+            dtype=types.DTYPE_FLOAT32,
+            quantization=None,
+            data=None,
+        )
+        with pytest.raises(ValueError, match="has no data"):
+            op_test_utils.build_layer_from_registry(op, tuple(tensors_list))
+
+
+class TestFloatDepthwiseConv2DCall:
+    def test__float_depthwise_conv2d_output_shape(self, float_depthwise_conv2d_setup):
+        """Output shape must match expected shape."""
+        op, tensors = float_depthwise_conv2d_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (2, 4, 4, 2)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_output_shape(output, (2, 4, 4, 2))
+
+    def test__float_depthwise_conv2d_formula_matches_numpy(self, float_depthwise_conv2d_setup):
+        """Float32 op output must match keras operations closely."""
+        op, tensors = float_depthwise_conv2d_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (1, 4, 4, 2)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+
+        kernel = tensors[op.input_indices[1]].data
+        bias = tensors[op.input_indices[2]].data
+
+        kernel_reshaped = np.reshape(kernel[0], (3, 3, 2, 1))
+
+        expected = keras.ops.depthwise_conv(
+            input_data,
+            kernel_reshaped,
+            strides=1,
+            padding="same",
+            dilation_rate=1,
+        )
+        expected = expected + bias
+        np.testing.assert_allclose(output, expected, atol=1e-5)
+
+
+class TestFloatDepthwiseConv2DTrainableWeights:
+    def test__float_depthwise_conv2d_trainable_weights(self, float_depthwise_conv2d_setup):
+        op, tensors = float_depthwise_conv2d_setup
+        layer, _ = op_test_utils.build_and_call(
+            op, tensors, np.zeros((1, 4, 4, 2), dtype=np.float32)
+        )
+        op_test_utils.assert_trainable_weight_names(layer, {"kernel", "bias"})
+
+    def test__float_depthwise_conv2d_non_trainable_weights(self, float_depthwise_conv2d_setup):
+        op, tensors = float_depthwise_conv2d_setup
+        layer, _ = op_test_utils.build_and_call(
+            op, tensors, np.zeros((1, 4, 4, 2), dtype=np.float32)
+        )
+        op_test_utils.assert_non_trainable_weight_names(layer, set())
+
+
+class TestFloatDepthwiseConv2DWriteOps:
+    def test__float_depthwise_conv2d_is_writable(self, float_depthwise_conv2d_setup):
+        op, tensors = float_depthwise_conv2d_setup
+        layer, _ = op_test_utils.build_and_call(
+            op, tensors, np.zeros((1, 4, 4, 2), dtype=np.float32)
+        )
+        op_test_utils.assert_layer_is_writable(layer)
+
+    def test__float_depthwise_conv2d_write_ops_counts(self, float_depthwise_conv2d_setup):
+        op, tensors = float_depthwise_conv2d_setup
+        layer, _ = op_test_utils.build_and_call(
+            op, tensors, np.zeros((1, 4, 4, 2), dtype=np.float32)
+        )
+        op_test_utils.assert_collect_write_ops(
+            layer,
+            op,
+            expected_buffer_writes=2,
+            expected_quant_writes=0,
+        )
+
+    def test__float_depthwise_conv2d_write_ops_buffer_indices(self, float_depthwise_conv2d_setup):
+        op, tensors = float_depthwise_conv2d_setup
+        layer, _ = op_test_utils.build_and_call(
+            op, tensors, np.zeros((1, 4, 4, 2), dtype=np.float32)
+        )
+        buffer_writes, _ = layer.collect_write_ops(op)
+        op_test_utils.assert_buffer_write_tensor_indices(
+            buffer_writes, {op.input_indices[1], op.input_indices[2]}
+        )
+
+
+# ===================================================================
 # Integration tests — DepthwiseConv2D through fixture
 # ===================================================================
 
@@ -273,7 +436,7 @@ def make_depthwise_conv_tflite(tmp_path) -> Callable:
         model = keras.Model(inputs=inputs, outputs=outputs)
 
         output_path = tmp_path / f"dw_conv_{depth_multiplier}_{activation}_{float_io}.tflite"
-        export_quantized_tflite_model(input_shape, model, float_io, output_path)
+        conftest.export_quantized_tflite_model(input_shape, model, float_io, output_path)
         return output_path
 
     return _make
@@ -356,7 +519,7 @@ def test__depthwise_conv2d_integration(temp_model_dir, run_interpreter):
     input_shape = (1, 8, 8, 3)
 
     output_path = temp_model_dir / "depthwise_conv2d_integration.tflite"
-    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+    conftest.export_quantized_tflite_model(input_shape[1:], model, True, output_path)
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
@@ -410,3 +573,22 @@ def test__depthwise_conv2d_weight_int8_trainable_save_roundtrip(
 
     # Outputs must match: Keras forward (with quantize_to_int8_ste snap) ≈ Interpreter
     np.testing.assert_allclose(keras_output_before, saved_outputs, atol=1e-3)
+
+
+def test__float32_depthwise_conv2d_integration(temp_model_dir, run_interpreter):
+    keras.utils.set_random_seed(42)
+
+    # Build a minimal Keras model that uses this op
+    inputs = keras.Input(shape=(8, 8, 3))
+    outputs = keras.layers.DepthwiseConv2D(3)(inputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    input_shape = (1, 8, 8, 3)
+
+    output_path = temp_model_dir / "float32_depthwise_conv2d_integration.tflite"
+    conftest.export_float32_tflite_model(input_shape[1:], model, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
+    op_test_utils.verify_model_contains_operator(output_path, "DEPTHWISE_CONV_2D")

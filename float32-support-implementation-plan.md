@@ -438,7 +438,7 @@ ______________________________________________________________________
 
 - [x] `FULLY_CONNECTED` — done (reference implementation)
 - [x] `CONV_2D`
-- [ ] `DEPTHWISE_CONV_2D`
+- [x] `DEPTHWISE_CONV_2D`
 
 ### Category B: Element-wise binary ops
 
