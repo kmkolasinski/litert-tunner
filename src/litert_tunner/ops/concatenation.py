@@ -1,11 +1,16 @@
 """CONCATENATION op implementation for litert_tunner.
 
-Simulates TFLite's quantized CONCATENATION op as a Keras layer.
-Concatenates multiple INT8 tensors along a specified axis.
+Simulates TFLite's CONCATENATION op as a Keras layer.
+Supports both fully-quantized INT8 and float32 (unquantized) models.
 
+Quantized variant:
+Concatenates multiple INT8 tensors along a specified axis.
 When input quantization parameters differ from the output, each input
 is requantized (dequantize → quantize) to the output's quantization
 domain before concatenation. When they match, it's a passthrough.
+
+Float32 variant:
+Directly applies keras.ops.concatenate and any fused activation.
 """
 
 from __future__ import annotations
@@ -138,26 +143,73 @@ class QuantizedConcatenation(keras.Layer, types.Writable):
         return [], quant_writes
 
 
+class FloatConcatenation(keras.Layer):
+    """Float32 CONCATENATION op.
+
+    Args:
+        axis: Concatenation axis.
+        fused_activation: TFLite fused activation code.
+        name: Layer name.
+    """
+
+    def __init__(
+        self,
+        axis: int = -1,
+        fused_activation: int = utils.FUSED_ACTIVATION_NONE,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._axis = axis
+        self._fused_activation = fused_activation
+
+    def call(self, inputs: TensorLike | list[TensorLike] | tuple[TensorLike, ...]) -> TensorLike:
+        """Forward pass applying concatenation in float32."""
+        if not isinstance(inputs, (list, tuple)):
+            inputs = [inputs]
+        output_float = ops.concatenate(inputs, axis=self._axis)
+        return utils.apply_fused_activation(output_float, self._fused_activation)
+
+    def get_config(self):
+        """Return the configuration dictionary for serialization."""
+        config = super().get_config()
+        config.update({
+            "axis": self._axis,
+            "fused_activation": self._fused_activation,
+        })
+        return config
+
+
 @registry.register_op("CONCATENATION")
 def build_concatenation(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a QuantizedConcatenation layer from parsed TFLite operator info.
+    """Build a CONCATENATION layer from parsed TFLite operator info.
 
     TFLite CONCATENATION inputs:
-        [0..N-1] input tensors (INT8) to concatenate
+        [0..N-1] input tensors to concatenate
 
     TFLite CONCATENATION outputs:
-        [0] output tensor (INT8)
+        [0] output tensor
 
     Args:
         op: Parsed operator info with input/output indices and options.
         tensors: All tensors in the graph.
 
     Returns:
-        A configured QuantizedConcatenation Keras layer.
+        A configured Keras layer.
     """
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_concatenation(op, tensors)
+    return _build_float_concatenation(op, tensors)
+
+
+def _build_quantized_concatenation(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a QuantizedConcatenation layer."""
     output_tensor = tensors[op.output_indices[0]]
     output_quant = output_tensor.quantization
 
@@ -187,4 +239,19 @@ def build_concatenation(
         axis=axis,
         fused_activation=fused_activation,
         name=f"quantized_concatenation_{op.output_indices[0]}",
+    )
+
+
+def _build_float_concatenation(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],  # noqa: ARG001
+) -> keras.Layer:
+    """Build a FloatConcatenation layer."""
+    axis = op.options.get("Axis", -1)
+    fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
+
+    return FloatConcatenation(
+        axis=axis,
+        fused_activation=fused_activation,
+        name=f"float_concatenation_{op.output_indices[0]}",
     )

@@ -454,7 +454,7 @@ ______________________________________________________________________
 - [x] `LOGISTIC`
 - [ ] `SOFTMAX`
 - [x] `MEAN`
-- [ ] `CONCATENATION`
+- [x] `CONCATENATION`
 - [ ] `NEG`
 - [ ] `RSQRT`
 - [ ] `SQUARED_DIFFERENCE`
