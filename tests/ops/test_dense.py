@@ -9,7 +9,7 @@ import pytest
 import litert_tunner
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
-from tests.conftest import export_float32_tflite_model, export_quantized_tflite_model
+from tests import conftest
 from tests.ops import op_test_utils
 
 
@@ -279,7 +279,8 @@ class TestDenseWriteOps:
         )
 
 
-def test__dense_integration(temp_model_dir, run_interpreter):
+@pytest.mark.parametrize("quantization", ["int8", "float32"])
+def test__dense_integration(temp_model_dir, run_interpreter, quantization: str):
     keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(4,))
@@ -287,8 +288,14 @@ def test__dense_integration(temp_model_dir, run_interpreter):
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 4)
 
-    output_path = temp_model_dir / "dense_integration.tflite"
-    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+    output_path = temp_model_dir / f"{quantization}_dense_integration.tflite"
+    conftest.export_tflite_model(
+        input_shape=input_shape[1:],
+        model=model,
+        quantization=quantization,
+        float_io=True,
+        output_path=output_path,
+    )
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
@@ -487,24 +494,6 @@ def test__float32_dense_with_relu_matches_interpreter(
     x_train = rng.uniform(-1.0, 1.0, (2, 8)).astype(np.float32)
 
     op_test_utils.verify_model_outputs(model_path, x_train, run_interpreter)
-
-
-def test__float32_dense_integration(temp_model_dir, run_interpreter):
-    """Full integration: build float32 dense, load, compare, save, compare again."""
-    keras.utils.set_random_seed(42)
-
-    inputs = keras.Input(shape=(4,))
-    outputs = keras.layers.Dense(8)(inputs)
-    model = keras.Model(inputs=inputs, outputs=outputs)
-
-    output_path = temp_model_dir / "float32_dense_integration.tflite"
-    export_float32_tflite_model((4,), model, output_path)
-
-    rng = np.random.default_rng(42)
-    x_train = rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32)
-
-    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
-    op_test_utils.verify_model_contains_operator(output_path, "FULLY_CONNECTED")
 
 
 def test__dense_weight_int8_trainable_save_roundtrip(

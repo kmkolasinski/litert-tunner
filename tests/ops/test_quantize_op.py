@@ -15,7 +15,7 @@ from keras import ops
 
 from litert_tunner.graph import types
 from litert_tunner.ops import quantize_op, registry, utils
-from tests.conftest import export_quantized_tflite_model
+from tests import conftest
 from tests.ops import op_test_utils
 
 # ---------------------------------------------------------------------------
@@ -645,7 +645,8 @@ class TestDequantizeLayer:
         assert config["passthrough"] is True
 
 
-def test__quantize_op_integration(temp_model_dir, run_interpreter):
+@pytest.mark.parametrize("quantization", ["int8", "float32"])
+def test__quantize_op_integration(temp_model_dir, run_interpreter, quantization: str):
     keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(4,))
@@ -653,12 +654,20 @@ def test__quantize_op_integration(temp_model_dir, run_interpreter):
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 4)
 
-    output_path = temp_model_dir / "quantize_op_integration.tflite"
-    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+    output_path = temp_model_dir / f"{quantization}_quantize_op_integration.tflite"
+    conftest.export_tflite_model(
+        input_shape=input_shape[1:],
+        model=model,
+        quantization=quantization,
+        float_io=True,
+        output_path=output_path,
+    )
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
 
-    op_test_utils.verify_model_contains_operator(output_path, "QUANTIZE")
+    op_test_utils.verify_model_contains_operator(
+        output_path, "QUANTIZE" if quantization == "int8" else "FULLY_CONNECTED"
+    )

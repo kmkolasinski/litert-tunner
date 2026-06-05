@@ -11,7 +11,6 @@ from litert_tunner import testing_utils
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
 from tests import conftest
-from tests.conftest import export_float32_tflite_model
 from tests.ops import op_test_utils
 
 # ---------------------------------------------------------------------------
@@ -456,7 +455,8 @@ def test__conv2d_save_roundtrip(make_resnet_tflite: Callable, run_interpreter: C
     np.testing.assert_allclose(litert_outputs, saved_outputs, atol=testing_utils.QUANT_STEP)
 
 
-def test__conv2d_integration(temp_model_dir, run_interpreter):
+@pytest.mark.parametrize("quantization", ["int8", "float32"])
+def test__conv2d_integration(temp_model_dir, run_interpreter, quantization: str):
     keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(8, 8, 3))
@@ -464,33 +464,20 @@ def test__conv2d_integration(temp_model_dir, run_interpreter):
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 8, 8, 3)
 
-    output_path = temp_model_dir / "conv2d_integration.tflite"
-    conftest.export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+    output_path = temp_model_dir / f"{quantization}_conv2d_integration.tflite"
+    conftest.export_tflite_model(
+        input_shape=input_shape[1:],
+        model=model,
+        quantization=quantization,
+        float_io=True,
+        output_path=output_path,
+    )
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
 
-    op_test_utils.verify_model_contains_operator(output_path, "CONV_2D")
-
-
-def test__float32_conv2d_integration(temp_model_dir, run_interpreter):
-    """Float32 CONV_2D: load → predict → save → reload → compare."""
-    keras.utils.set_random_seed(42)
-
-    inputs = keras.Input(shape=(8, 8, 3))
-    outputs = keras.layers.Conv2D(8, 3)(inputs)
-    model = keras.Model(inputs=inputs, outputs=outputs)
-    input_shape = (1, 8, 8, 3)
-
-    output_path = temp_model_dir / "float32_conv2d_integration.tflite"
-    export_float32_tflite_model(input_shape[1:], model, output_path)
-
-    rng = np.random.default_rng(42)
-    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
-
-    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
     op_test_utils.verify_model_contains_operator(output_path, "CONV_2D")
 
 

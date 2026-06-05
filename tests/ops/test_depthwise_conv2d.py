@@ -510,25 +510,6 @@ def test__depthwise_conv2d_save_roundtrip(
     np.testing.assert_allclose(litert_outputs, saved_outputs, atol=1e-3)
 
 
-def test__depthwise_conv2d_integration(temp_model_dir, run_interpreter):
-    keras.utils.set_random_seed(42)
-
-    inputs = keras.Input(shape=(8, 8, 3))
-    outputs = keras.layers.DepthwiseConv2D(3)(inputs)
-    model = keras.Model(inputs=inputs, outputs=outputs)
-    input_shape = (1, 8, 8, 3)
-
-    output_path = temp_model_dir / "depthwise_conv2d_integration.tflite"
-    conftest.export_quantized_tflite_model(input_shape[1:], model, True, output_path)
-
-    rng = np.random.default_rng(42)
-    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
-
-    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
-
-    op_test_utils.verify_model_contains_operator(output_path, "DEPTHWISE_CONV_2D")
-
-
 def test__depthwise_conv2d_weight_int8_trainable_save_roundtrip(
     make_depthwise_conv_tflite: Callable, run_interpreter: Callable
 ):
@@ -575,20 +556,27 @@ def test__depthwise_conv2d_weight_int8_trainable_save_roundtrip(
     np.testing.assert_allclose(keras_output_before, saved_outputs, atol=1e-3)
 
 
-def test__float32_depthwise_conv2d_integration(temp_model_dir, run_interpreter):
+@pytest.mark.parametrize("quantization", ["int8", "float32"])
+def test__depthwise_conv2d_integration(temp_model_dir, run_interpreter, quantization: str):
     keras.utils.set_random_seed(42)
 
-    # Build a minimal Keras model that uses this op
     inputs = keras.Input(shape=(8, 8, 3))
     outputs = keras.layers.DepthwiseConv2D(3)(inputs)
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 8, 8, 3)
 
-    output_path = temp_model_dir / "float32_depthwise_conv2d_integration.tflite"
-    conftest.export_float32_tflite_model(input_shape[1:], model, output_path)
+    output_path = temp_model_dir / f"{quantization}_depthwise_conv2d_integration.tflite"
+    conftest.export_tflite_model(
+        input_shape=input_shape[1:],
+        model=model,
+        quantization=quantization,
+        float_io=True,
+        output_path=output_path,
+    )
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
+
     op_test_utils.verify_model_contains_operator(output_path, "DEPTHWISE_CONV_2D")

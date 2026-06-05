@@ -397,6 +397,24 @@ def export_float32_tflite_model(
         f.write(tflite_model)
 
 
+def export_tflite_model(
+    *,
+    input_shape: tuple[int, ...],
+    model: keras.Model,
+    quantization: str,
+    float_io: bool,
+    output_path: Path,
+):
+    """Export a Keras model to TFLite based on the specified quantization."""
+    if quantization == "int8":
+        export_quantized_tflite_model(input_shape, model, float_io, output_path)
+    elif quantization == "float32":
+        export_float32_tflite_model(input_shape, model, output_path)
+    else:
+        msg = f"Unknown quantization: {quantization}"
+        raise ValueError(msg)
+
+
 @pytest.fixture
 def make_float32_dense_tflite(temp_model_dir: Path) -> Callable:
     """Fixture returning a function to create float32 (unquantized) FullyConnected TFLite models."""
