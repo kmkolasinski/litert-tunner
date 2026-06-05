@@ -3,8 +3,10 @@
 from collections.abc import Callable
 from pathlib import Path
 
+import keras
 import numpy as np
 import pytest
+import tensorflow as tf
 import tflite
 
 from litert_tunner import flatbuffer
@@ -479,3 +481,42 @@ class TestBuiltinOptionsParsing:
         fc_ops = [op for op in graph_def.operators if op.op_type == "FULLY_CONNECTED"]
         fc_op = fc_ops[0]
         assert fc_op.options.get("fused_activation_function", 0) > 0
+
+
+class TestParseTfliteFloat16:
+    """Tests for parsing float16 optimized TFLite models."""
+
+    def test__dequantize_on_constant_is_eagerly_evaluated(self, tmp_path: Path):
+        """Test that DEQUANTIZE op on a float16 constant is eagerly evaluated."""
+        # 1. Create a simple model
+        inputs = keras.Input(shape=(4,))
+        x = keras.layers.Dense(2, use_bias=True)(inputs)
+        model = keras.Model(inputs=inputs, outputs=x)
+
+        # 2. Export to float16 TFLite
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        converter.target_spec.supported_types = [tf.float16]
+        tflite_model = converter.convert()
+
+        model_path = tmp_path / "float16.tflite"
+        model_path.write_bytes(tflite_model)
+
+        # 3. Parse the model
+        graph_def = parser.parse_tflite(model_path)
+
+        # 4. Verify DEQUANTIZE is removed
+        op_types = [op.op_type for op in graph_def.operators]
+        assert "DEQUANTIZE" not in op_types, "DEQUANTIZE op should be eagerly evaluated and removed"
+
+        # 5. Verify FULLY_CONNECTED weights are float32 but keep float16 buffer index
+        fc_ops = [op for op in graph_def.operators if op.op_type == "FULLY_CONNECTED"]
+        assert len(fc_ops) == 1
+        fc_op = fc_ops[0]
+        weight_tensor = graph_def.tensors[fc_op.input_indices[1]]
+
+        assert weight_tensor.data is not None, "Weight data should be eagerly evaluated"
+        assert weight_tensor.data.dtype == "float32", "Data should be cast to float32"
+        assert weight_tensor.dtype == types.DTYPE_FLOAT16, (
+            "Original FLOAT16 dtype should be preserved"
+        )

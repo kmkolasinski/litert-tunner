@@ -1,4 +1,7 @@
-"""Quantize and Dequantize op builders and Keras layers for litert_tunner."""
+"""Quantize and Dequantize op builders and Keras layers for litert_tunner.
+
+Supports both quantized (INT8) and float32 models.
+"""
 
 from __future__ import annotations
 
@@ -167,18 +170,27 @@ class Quantize(keras.Layer, types.Writable):
         return [], [quant_write]
 
 
-@registry.register_op("QUANTIZE")
-def build_quantize(
+class FloatQuantize(keras.Layer):
+    """Float32 Quantize passthrough layer."""
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Pass input through unchanged."""
+        return x
+
+
+class FloatDequantize(keras.Layer):
+    """Float32 Dequantize passthrough layer."""
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Pass input through unchanged."""
+        return x
+
+
+def _build_quantized_quantize(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a Quantize layer from parsed TFLite operator info.
-
-    TFLite QUANTIZE inputs:
-        [0] input tensor (FLOAT32 or INT8)
-    TFLite QUANTIZE outputs:
-        [0] output tensor (INT8)
-    """
+    """Build a Quantize layer for INT8 models."""
     output_tensor = tensors[op.output_indices[0]]
     output_quant = output_tensor.quantization
 
@@ -197,18 +209,36 @@ def build_quantize(
     )
 
 
-@registry.register_op("DEQUANTIZE")
-def build_dequantize(
+def _build_float_quantize(
+    op: types.OperatorInfo,
+) -> keras.Layer:
+    """Build a FloatQuantize layer for float32 models."""
+    return FloatQuantize(name=f"float_quantize_{op.output_indices[0]}")
+
+
+@registry.register_op("QUANTIZE")
+def build_quantize(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a Dequantize layer from parsed TFLite operator info.
+    """Build a Quantize layer from parsed TFLite operator info.
 
-    TFLite DEQUANTIZE inputs:
-        [0] input tensor (INT8)
-    TFLite DEQUANTIZE outputs:
-        [0] output tensor (FLOAT32)
+    TFLite QUANTIZE inputs:
+        [0] input tensor (FLOAT32 or INT8)
+    TFLite QUANTIZE outputs:
+        [0] output tensor (INT8)
     """
+    output_tensor = tensors[op.output_indices[0]]
+    if types.is_quantized(output_tensor):
+        return _build_quantized_quantize(op, tensors)
+    return _build_float_quantize(op)
+
+
+def _build_quantized_dequantize(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a Dequantize layer for INT8 models."""
     input_tensor = tensors[op.input_indices[0]]
     input_quant = input_tensor.quantization
 
@@ -224,3 +254,28 @@ def build_dequantize(
         zero_point=zero_point,
         name=f"dequantize_{op.output_indices[0]}",
     )
+
+
+def _build_float_dequantize(
+    op: types.OperatorInfo,
+) -> keras.Layer:
+    """Build a FloatDequantize layer for float32 models."""
+    return FloatDequantize(name=f"float_dequantize_{op.output_indices[0]}")
+
+
+@registry.register_op("DEQUANTIZE")
+def build_dequantize(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a Dequantize layer from parsed TFLite operator info.
+
+    TFLite DEQUANTIZE inputs:
+        [0] input tensor (INT8)
+    TFLite DEQUANTIZE outputs:
+        [0] output tensor (FLOAT32)
+    """
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_dequantize(op, tensors)
+    return _build_float_dequantize(op)

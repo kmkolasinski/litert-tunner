@@ -62,11 +62,8 @@ def save_tflite(model: keras.Model, path: str | Path) -> None:
 
     # Apply all buffer writes
     for write_op in buffer_writes:
-        tensor_t = subgraph_t.Tensors(write_op.tensor_index)
-        if tensor_t is None:
-            msg = f"Tensor at index {write_op.tensor_index} is None"
-            raise ValueError(msg)
-        _overwrite_buffer(buf, model_obj, tensor_t.Buffer(), write_op.data)
+        buffer_idx = graph_def.tensors[write_op.tensor_index].buffer_index
+        _overwrite_buffer(buf, model_obj, buffer_idx, write_op.data)
 
     # Apply all quantization writes
     for write_op in quant_writes:

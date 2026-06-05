@@ -9,7 +9,10 @@ from pathlib import Path
 import numpy as np
 import tflite
 
+from litert_tunner import logging as tunner_logging
 from litert_tunner.graph import types
+
+logger = tunner_logging.get_logger(__name__)
 
 # Mapping from tflite TensorType codes to internal dtype strings.
 _TENSOR_TYPE_MAP: dict[int, str] = {
@@ -321,6 +324,42 @@ def parse_tflite(path: str | Path) -> types.GraphDef:  # noqa: C901, PLR0912, PL
                 options=options,
             )
         )
+
+    # 3. Eagerly evaluate DEQUANTIZE ops that operate only on constants
+    # This is common in float16 quantized models where weights are float16 and
+    # dequantized to float32 before use. We absorb the dequantization into the
+    # tensor data and skip adding the DEQUANTIZE op to the Keras graph.
+    filtered_operators: list[types.OperatorInfo] = []
+    for op in operators:
+        if op.op_type == "DEQUANTIZE" and len(op.input_indices) > 0:
+            in_idx = op.input_indices[0]
+            if in_idx >= 0:
+                in_data = tensors[in_idx].data
+                if in_data is not None:
+                    if len(op.output_indices) != 1:
+                        logger.warning(
+                            "DEQUANTIZE op %s has %d outputs, expected 1",
+                            op.op_type,
+                            len(op.output_indices),
+                        )
+                        continue
+
+                    out_idx = op.output_indices[0]
+                    # Eagerly evaluate the dequantize and map the output tensor back
+                    # to the source buffer with the original dtype (so writer works).
+                    tensors[out_idx] = types.TensorInfo(
+                        name=tensors[out_idx].name,
+                        index=out_idx,
+                        shape=tensors[out_idx].shape,
+                        dtype=tensors[in_idx].dtype,
+                        quantization=tensors[out_idx].quantization,
+                        buffer_index=tensors[in_idx].buffer_index,
+                        data=in_data.astype(np.float32),
+                    )
+                    continue
+        filtered_operators.append(op)
+
+    operators = filtered_operators
 
     sub_inputs = subgraph.InputsAsNumpy()
     input_indices = tuple(sub_inputs) if isinstance(sub_inputs, np.ndarray) else ()

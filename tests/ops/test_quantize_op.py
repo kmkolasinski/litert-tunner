@@ -86,6 +86,63 @@ def dequantize_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]
     return op, tensors
 
 
+# ---------------------------------------------------------------------------
+# Fixtures — Float32
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def float_quantize_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a minimal QUANTIZE op with float32 I/O (no quantization)."""
+    input_tensor = op_test_utils.make_tensor(
+        name="input_f32",
+        index=0,
+        shape=(1, 4),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+    )
+    output_tensor = op_test_utils.make_tensor(
+        name="output_f32",
+        index=1,
+        shape=(1, 4),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+    )
+    tensors = (input_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="QUANTIZE",
+        input_indices=(0,),
+        output_indices=(1,),
+    )
+    return op, tensors
+
+
+@pytest.fixture
+def float_dequantize_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a minimal DEQUANTIZE op with float32 I/O (no quantization)."""
+    input_tensor = op_test_utils.make_tensor(
+        name="input_f32",
+        index=0,
+        shape=(1, 8),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+    )
+    output_tensor = op_test_utils.make_tensor(
+        name="output_f32",
+        index=1,
+        shape=(1, 8),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+    )
+    tensors = (input_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="DEQUANTIZE",
+        input_indices=(0,),
+        output_indices=(1,),
+    )
+    return op, tensors
+
+
 # ===================================================================
 # QUANTIZE op tests
 # ===================================================================
@@ -112,17 +169,6 @@ class TestQuantizeBuild:
         assert layer.name.endswith(f"_{output_idx}"), (
             f"Layer name {layer.name!r} must end with '_{output_idx}'"
         )
-
-    def test__build_raises_without_output_quantization(self):
-        """Builder must raise if the output tensor has no quantization."""
-        output_tensor = op_test_utils.make_tensor(name="bad_output", index=1, quantization=None)
-        input_tensor = op_test_utils.make_tensor(name="input", index=0)
-        tensors = (input_tensor, output_tensor)
-        op = op_test_utils.make_operator(
-            op_type="QUANTIZE", input_indices=(0,), output_indices=(1,)
-        )
-        with pytest.raises(ValueError, match="QUANTIZE op requires quantized output"):
-            op_test_utils.build_layer_from_registry(op, tensors)
 
 
 class TestQuantizeCall:
@@ -230,6 +276,58 @@ class TestQuantizeWriteOps:
         assert quant_writes[0].zero_points == [layer_zp]
 
 
+class TestFloatQuantizeBuild:
+    def test__float_quantize_build_returns_keras_layer(self, float_quantize_setup):
+        """Builder must return a Keras layer for float32 inputs."""
+        op, tensors = float_quantize_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        assert isinstance(layer, keras.Layer)
+
+    def test__float_quantize_layer_name_contains_output_index(self, float_quantize_setup):
+        """Layer name must end with output tensor index."""
+        op, tensors = float_quantize_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        output_idx = op.output_indices[0]
+        assert layer.name.endswith(f"_{output_idx}")
+
+
+class TestFloatQuantizeCall:
+    def test__float_quantize_output_shape(self, float_quantize_setup):
+        """Output shape must match expected shape."""
+        op, tensors = float_quantize_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_output_shape(output, (1, 4))
+
+    def test__float_quantize_formula_matches_numpy(self, float_quantize_setup):
+        """Float32 op output must match numpy reference computation."""
+        op, tensors = float_quantize_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (1, 4)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        np.testing.assert_allclose(output, input_data, atol=1e-5)
+
+
+class TestFloatQuantizeTrainableWeights:
+    def test__float_quantize_trainable_weights(self, float_quantize_setup):
+        op, tensors = float_quantize_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        op_test_utils.assert_trainable_weight_names(layer, set())
+
+    def test__float_quantize_non_trainable_weights(self, float_quantize_setup):
+        op, tensors = float_quantize_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        op_test_utils.assert_non_trainable_weight_names(layer, set())
+
+
+class TestFloatQuantizeWriteOps:
+    def test__float_quantize_not_writable(self, float_quantize_setup):
+        op, tensors = float_quantize_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        op_test_utils.assert_layer_not_writable(layer)
+
+
 # ===================================================================
 # DEQUANTIZE op tests
 # ===================================================================
@@ -256,17 +354,6 @@ class TestDequantizeBuild:
         assert layer.name.endswith(f"_{output_idx}"), (
             f"Layer name {layer.name!r} must end with '_{output_idx}'"
         )
-
-    def test__build_raises_without_input_quantization(self):
-        """Builder must raise if the input tensor has no quantization."""
-        input_tensor = op_test_utils.make_tensor(name="bad_input", index=0, quantization=None)
-        output_tensor = op_test_utils.make_tensor(name="output", index=1, dtype=types.DTYPE_FLOAT32)
-        tensors = (input_tensor, output_tensor)
-        op = op_test_utils.make_operator(
-            op_type="DEQUANTIZE", input_indices=(0,), output_indices=(1,)
-        )
-        with pytest.raises(ValueError, match="DEQUANTIZE op requires quantized input"):
-            op_test_utils.build_layer_from_registry(op, tensors)
 
 
 class TestDequantizeCall:
@@ -369,6 +456,58 @@ class TestDequantizeWriteOps:
         _, quant_writes = layer.collect_write_ops(op)
         layer_zp = int(np.round(np.asarray(ops.convert_to_numpy(layer.zero_point))))
         assert quant_writes[0].zero_points == [layer_zp]
+
+
+class TestFloatDequantizeBuild:
+    def test__float_dequantize_build_returns_keras_layer(self, float_dequantize_setup):
+        """Builder must return a Keras layer for float32 inputs."""
+        op, tensors = float_dequantize_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        assert isinstance(layer, keras.Layer)
+
+    def test__float_dequantize_layer_name_contains_output_index(self, float_dequantize_setup):
+        """Layer name must end with output tensor index."""
+        op, tensors = float_dequantize_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        output_idx = op.output_indices[0]
+        assert layer.name.endswith(f"_{output_idx}")
+
+
+class TestFloatDequantizeCall:
+    def test__float_dequantize_output_shape(self, float_dequantize_setup):
+        """Output shape must match expected shape."""
+        op, tensors = float_dequantize_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (1, 8)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_output_shape(output, (1, 8))
+
+    def test__float_dequantize_formula_matches_numpy(self, float_dequantize_setup):
+        """Float32 op output must match numpy reference computation."""
+        op, tensors = float_dequantize_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (1, 8)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        np.testing.assert_allclose(output, input_data, atol=1e-5)
+
+
+class TestFloatDequantizeTrainableWeights:
+    def test__float_dequantize_trainable_weights(self, float_dequantize_setup):
+        op, tensors = float_dequantize_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 8), dtype=np.float32))
+        op_test_utils.assert_trainable_weight_names(layer, set())
+
+    def test__float_dequantize_non_trainable_weights(self, float_dequantize_setup):
+        op, tensors = float_dequantize_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 8), dtype=np.float32))
+        op_test_utils.assert_non_trainable_weight_names(layer, set())
+
+
+class TestFloatDequantizeWriteOps:
+    def test__float_dequantize_not_writable(self, float_dequantize_setup):
+        op, tensors = float_dequantize_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 8), dtype=np.float32))
+        op_test_utils.assert_layer_not_writable(layer)
 
 
 # ===================================================================
