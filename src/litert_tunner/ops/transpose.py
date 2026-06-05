@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
 
 
-class QuantizedTranspose(keras.Layer):
+class Transpose(keras.Layer):
     """Simulates TFLite's TRANSPOSE op.
 
     Permutes the dimensions of the input tensor according to the
@@ -67,7 +67,7 @@ def build_transpose(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a QuantizedTranspose layer from parsed TFLite operator info.
+    """Build a Transpose layer from parsed TFLite operator info.
 
     TFLite TRANSPOSE inputs:
         [0] input tensor (INT8 or float32)
@@ -90,7 +90,7 @@ def build_transpose(
 
     perm = tuple(int(d) for d in perm_tensor.data.flatten())
 
-    return QuantizedTranspose(
+    return Transpose(
         perm=perm,
-        name=f"quantized_transpose_{op.output_indices[0]}",
+        name=f"transpose_{op.output_indices[0]}",
     )

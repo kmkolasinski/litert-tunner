@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
 
 
-class QuantizedPack(keras.Layer):
+class Pack(keras.Layer):
     """Simulates TFLite's PACK op.
 
     Packs (stacks) multiple input tensors along a new axis. This is a
@@ -105,7 +105,7 @@ def build_pack(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a QuantizedPack layer from parsed TFLite operator info.
+    """Build a Pack layer from parsed TFLite operator info.
 
     TFLite PACK inputs:
         [0..N-1] input tensors to pack (may include constants)
@@ -135,9 +135,9 @@ def build_pack(
             if tensor.data is not None:
                 constant_map[pos] = float(tensor.data.flat[0])
 
-    return QuantizedPack(
+    return Pack(
         axis=axis,
         values_count=values_count,
         constant_map=constant_map,
-        name=f"quantized_pack_{op.output_indices[0]}",
+        name=f"pack_{op.output_indices[0]}",
     )

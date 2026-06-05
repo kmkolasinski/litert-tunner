@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from litert_tunner.ops.utils import TensorLike
 
 
-class QuantizedShape(keras.Layer):
+class Shape(keras.Layer):
     """Simulates TFLite's SHAPE op.
 
     Returns the shape of the input tensor as a 1-D tensor of int32 values.
@@ -51,7 +51,7 @@ def build_shape(
     op: types.OperatorInfo,
     _tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a QuantizedShape layer from parsed TFLite operator info.
+    """Build a Shape layer from parsed TFLite operator info.
 
     TFLite SHAPE inputs:
         [0] input tensor (any type)
@@ -67,6 +67,6 @@ def build_shape(
     Returns:
         A configured QuantizedShape Keras layer.
     """
-    return QuantizedShape(
-        name=f"quantized_shape_{op.output_indices[0]}",
+    return Shape(
+        name=f"shape_{op.output_indices[0]}",
     )

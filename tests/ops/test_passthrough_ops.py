@@ -98,7 +98,7 @@ class TestReshape:
 
     def test__reshape_dynamic_shape_bug_reproduction(self):
         """Verify dynamic shape inputs work without crashing."""
-        layer = reshape.QuantizedReshape(target_shape=(1, 1, 32), name="quantized_reshape_test")
+        layer = reshape.Reshape(target_shape=(1, 1, 32), name="reshape_test")
 
         data_input = keras.Input(shape=(32,), dtype="float32")
         shape_input = keras.Input(shape=(4,), dtype="float32")

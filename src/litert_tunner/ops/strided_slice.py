@@ -28,7 +28,7 @@ _NEW_AXIS_MASK_BIT = 3
 _SHRINK_AXIS_MASK_BIT = 4
 
 
-class QuantizedStridedSlice(keras.Layer):
+class StridedSlice(keras.Layer):
     """Simulates TFLite's STRIDED_SLICE op.
 
     Extracts a strided slice from the input tensor. This is a passthrough
@@ -136,7 +136,7 @@ def build_strided_slice(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a QuantizedStridedSlice layer from parsed TFLite operator info.
+    """Build a StridedSlice layer from parsed TFLite operator info.
 
     TFLite STRIDED_SLICE inputs:
         [0] input tensor
@@ -173,7 +173,7 @@ def build_strided_slice(
     new_axis_mask = op.options.get("NewAxisMask", 0)
     shrink_axis_mask = op.options.get("ShrinkAxisMask", 0)
 
-    return QuantizedStridedSlice(
+    return StridedSlice(
         begin=begin,
         end=end,
         strides=strides,
@@ -182,5 +182,5 @@ def build_strided_slice(
         ellipsis_mask=ellipsis_mask,
         new_axis_mask=new_axis_mask,
         shrink_axis_mask=shrink_axis_mask,
-        name=f"quantized_strided_slice_{op.output_indices[0]}",
+        name=f"strided_slice_{op.output_indices[0]}",
     )

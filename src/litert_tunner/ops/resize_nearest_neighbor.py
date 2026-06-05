@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
 
 
-class QuantizedResizeNearestNeighbor(keras.Layer):
+class ResizeNearestNeighbor(keras.Layer):
     """Simulates TFLite's RESIZE_NEAREST_NEIGHBOR op.
 
     Performs nearest-neighbor interpolation to resize spatial dimensions.
@@ -107,7 +107,7 @@ def build_resize_nearest_neighbor(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a QuantizedResizeNearestNeighbor layer from parsed TFLite operator info.
+    """Build a ResizeNearestNeighbor layer from parsed TFLite operator info.
 
     TFLite RESIZE_NEAREST_NEIGHBOR inputs:
         [0] input tensor (INT8), shape (batch, H, W, C)
@@ -135,10 +135,10 @@ def build_resize_nearest_neighbor(
     align_corners = op.options.get("AlignCorners", False)
     half_pixel_centers = op.options.get("HalfPixelCenters", False)
 
-    return QuantizedResizeNearestNeighbor(
+    return ResizeNearestNeighbor(
         target_height=target_height,
         target_width=target_width,
         align_corners=align_corners,
         half_pixel_centers=half_pixel_centers,
-        name=f"quantized_resize_nn_{op.output_indices[0]}",
+        name=f"resize_nn_{op.output_indices[0]}",
     )

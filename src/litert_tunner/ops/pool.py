@@ -28,7 +28,7 @@ _PADDING_MAP: dict[int, str] = {
 }
 
 
-class QuantizedMaxPool2D(keras.Layer):
+class MaxPool2D(keras.Layer):
     """Simulates TFLite's quantized MAX_POOL_2D op.
 
     MAX_POOL_2D is a passthrough for quantization: it does not change
@@ -106,7 +106,7 @@ def build_max_pool_2d(
     op: types.OperatorInfo,
     _tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a QuantizedMaxPool2D layer from parsed TFLite operator info.
+    """Build a MaxPool2D layer from parsed TFLite operator info.
 
     TFLite MAX_POOL_2D inputs:
         [0] input tensor (INT8), shape (batch, H, W, C)
@@ -120,7 +120,7 @@ def build_max_pool_2d(
         graph_def: The parsed GraphDef.
 
     Returns:
-        A configured QuantizedMaxPool2D Keras layer.
+        A configured MaxPool2D Keras layer.
     """
     filter_h = op.options.get("FilterHeight", 2)
     filter_w = op.options.get("FilterWidth", 2)
@@ -130,10 +130,10 @@ def build_max_pool_2d(
     padding = _map_padding(padding_code)
     fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
 
-    return QuantizedMaxPool2D(
+    return MaxPool2D(
         pool_size=(filter_h, filter_w),
         strides=(stride_h, stride_w),
         padding=padding,
         fused_activation=fused_activation,
-        name=f"quantized_max_pool_2d_{op.output_indices[0]}",
+        name=f"max_pool_2d_{op.output_indices[0]}",
     )

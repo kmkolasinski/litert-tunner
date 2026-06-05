@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     ShapeLike = tuple[int, ...] | list[int] | list[tuple[int, ...]]
 
 
-class QuantizedReshape(keras.Layer):
+class Reshape(keras.Layer):
     """Simulates TFLite's RESHAPE op.
 
     Reshapes the input tensor to the target shape. This is a passthrough
@@ -80,7 +80,7 @@ def build_reshape(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
-    """Build a QuantizedReshape layer from parsed TFLite operator info.
+    """Build a Reshape layer from parsed TFLite operator info.
 
     TFLite RESHAPE inputs:
         [0] input tensor (INT8 or FLOAT32)
@@ -130,7 +130,7 @@ def build_reshape(
     if len(target_shape) > 0 and target_shape[0] in (1, -1):
         target_shape = target_shape[1:]
 
-    return QuantizedReshape(
+    return Reshape(
         target_shape=target_shape,
-        name=f"quantized_reshape_{op.output_indices[0]}",
+        name=f"reshape_{op.output_indices[0]}",
     )
