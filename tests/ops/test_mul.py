@@ -128,27 +128,6 @@ class TestMulWriteOps:
         )
 
 
-def test__mul_integration(temp_model_dir, run_interpreter):
-    keras.utils.set_random_seed(42)
-
-    inputs = keras.Input(shape=(4,))
-    x = keras.layers.Dense(4)(inputs)
-    y = keras.layers.Dense(4)(inputs)
-    outputs = keras.layers.Multiply()([x, y])
-    model = keras.Model(inputs=inputs, outputs=outputs)
-    input_shape = (1, 4)
-
-    output_path = temp_model_dir / "mul_integration.tflite"
-    conftest.export_quantized_tflite_model(input_shape[1:], model, True, output_path)
-
-    rng = np.random.default_rng(42)
-    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
-
-    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
-
-    op_test_utils.verify_model_contains_operator(output_path, "MUL")
-
-
 @pytest.fixture
 def float_mul_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
     """Create a minimal MUL op with float32 I/O (no quantization)."""
@@ -233,8 +212,8 @@ class TestFloatMulWriteOps:
         op_test_utils.assert_layer_not_writable(layer)
 
 
-def test__float32_mul_integration(temp_model_dir, run_interpreter):
-    """Float32 MUL: load -> predict -> save -> reload -> compare."""
+@pytest.mark.parametrize("quantization", ["int8", "float32"])
+def test__mul_integration(temp_model_dir, run_interpreter, quantization: str):
     keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(4,))
@@ -244,11 +223,18 @@ def test__float32_mul_integration(temp_model_dir, run_interpreter):
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 4)
 
-    output_path = temp_model_dir / "float32_mul_integration.tflite"
-    conftest.export_float32_tflite_model(input_shape[1:], model, output_path)
+    output_path = temp_model_dir / f"{quantization}_mul_integration.tflite"
+    conftest.export_tflite_model(
+        input_shape=input_shape[1:],
+        model=model,
+        quantization=quantization,
+        float_io=True,
+        output_path=output_path,
+    )
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
+
     op_test_utils.verify_model_contains_operator(output_path, "MUL")

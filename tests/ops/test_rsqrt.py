@@ -209,7 +209,8 @@ class TestFloatRsqrtWriteOps:
         op_test_utils.assert_layer_not_writable(layer)
 
 
-def test__rsqrt_integration(temp_model_dir, run_interpreter):
+@pytest.mark.parametrize("quantization", ["int8", "float32"])
+def test__rsqrt_integration(temp_model_dir, run_interpreter, quantization: str):
     keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(4,))
@@ -219,29 +220,14 @@ def test__rsqrt_integration(temp_model_dir, run_interpreter):
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 4)
 
-    output_path = temp_model_dir / "rsqrt_integration.tflite"
-    conftest.export_quantized_tflite_model(input_shape[1:], model, True, output_path)
-
-    rng = np.random.default_rng(42)
-    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
-
-    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
-
-    op_test_utils.verify_model_contains_operator(output_path, "RSQRT")
-
-
-def test__float32_rsqrt_integration(temp_model_dir, run_interpreter):
-    keras.utils.set_random_seed(42)
-
-    inputs = keras.Input(shape=(4,))
-    # Ensure positive inputs for rsqrt
-    x = keras.layers.Activation("relu")(inputs) + 0.1
-    outputs = keras.ops.rsqrt(x)
-    model = keras.Model(inputs=inputs, outputs=outputs)
-    input_shape = (1, 4)
-
-    output_path = temp_model_dir / "float32_rsqrt_integration.tflite"
-    conftest.export_float32_tflite_model(input_shape[1:], model, output_path)
+    output_path = temp_model_dir / f"{quantization}_rsqrt_integration.tflite"
+    conftest.export_tflite_model(
+        input_shape=input_shape[1:],
+        model=model,
+        quantization=quantization,
+        float_io=True,
+        output_path=output_path,
+    )
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)

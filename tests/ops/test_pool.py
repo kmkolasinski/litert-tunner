@@ -6,7 +6,7 @@ import pytest
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
-from tests.conftest import export_quantized_tflite_model
+from tests import conftest
 from tests.ops import op_test_utils
 
 # ---------------------------------------------------------------------------
@@ -148,7 +148,8 @@ class TestMaxPool2DNotWritable:
         assert len(layer.trainable_weights) == 0
 
 
-def test__pool_integration(temp_model_dir, run_interpreter):
+@pytest.mark.parametrize("quantization", ["int8", "float32"])
+def test__pool_integration(temp_model_dir, run_interpreter, quantization: str):
     keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(8, 8, 3))
@@ -156,8 +157,14 @@ def test__pool_integration(temp_model_dir, run_interpreter):
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 8, 8, 3)
 
-    output_path = temp_model_dir / "pool_integration.tflite"
-    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+    output_path = temp_model_dir / f"{quantization}_pool_integration.tflite"
+    conftest.export_tflite_model(
+        input_shape=input_shape[1:],
+        model=model,
+        quantization=quantization,
+        float_io=True,
+        output_path=output_path,
+    )
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)

@@ -21,6 +21,72 @@ def temp_model_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def export_quantized_tflite_model(
+    input_shape: tuple[int, ...], model: keras.Model, float_io: bool, output_path: Path
+):
+    def representative_dataset_gen():
+        # Get shape from model input shape, replacing None or dynamic dimensions with 1
+        rep_shape = [1 if d is None else d for d in model.input_shape]
+        rng = np.random.default_rng(42)
+        for _ in range(10):
+            # Generates values within [-1.0, 1.0]
+            yield [rng.uniform(-1.0, 1.0, rep_shape).astype(np.float32)]
+
+    # Convert to TFLite fully quantized INT8
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    converter.representative_dataset = representative_dataset_gen
+    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+
+    if not float_io:
+        converter.inference_input_type = tf.int8
+        converter.inference_output_type = tf.int8
+
+    tflite_model = converter.convert()
+
+    # Save to temp path
+    with output_path.open("wb") as f:
+        f.write(tflite_model)
+
+
+def export_float32_tflite_model(
+    input_shape: tuple[int, ...], model: keras.Model, output_path: Path
+):
+    """Export a Keras model to a float32 (unquantized) TFLite model.
+
+    Unlike ``export_quantized_tflite_model``, this applies no quantization.
+    The resulting model has all tensors in FLOAT32.
+
+    Args:
+        input_shape: Shape of the model input (excluding batch).
+        model: The Keras model to convert.
+        output_path: Where to save the .tflite file.
+    """
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    tflite_model = converter.convert()
+
+    with output_path.open("wb") as f:
+        f.write(tflite_model)
+
+
+def export_tflite_model(
+    *,
+    input_shape: tuple[int, ...],
+    model: keras.Model,
+    quantization: str,
+    float_io: bool,
+    output_path: Path,
+):
+    """Export a Keras model to TFLite based on the specified quantization."""
+    if quantization == "int8":
+        export_quantized_tflite_model(input_shape, model, float_io, output_path)
+    elif quantization == "float32":
+        export_float32_tflite_model(input_shape, model, output_path)
+    else:
+        msg = f"Unknown quantization: {quantization}"
+        raise ValueError(msg)
+
+
 @pytest.fixture
 def make_dense_tflite(temp_model_dir: Path) -> Callable:
     """Fixture returning a function to create fully quantized INT8 FullyConnected TFLite models."""
@@ -306,34 +372,6 @@ def make_efficientnetb0_tflite(make_backbone_tflite: Callable) -> Callable:
     return make_backbone_tflite
 
 
-def export_quantized_tflite_model(
-    input_shape: tuple[int, ...], model: keras.Model, float_io: bool, output_path: Path
-):
-    def representative_dataset_gen():
-        # Get shape from model input shape, replacing None or dynamic dimensions with 1
-        rep_shape = [1 if d is None else d for d in model.input_shape]
-        rng = np.random.default_rng(42)
-        for _ in range(10):
-            # Generates values within [-1.0, 1.0]
-            yield [rng.uniform(-1.0, 1.0, rep_shape).astype(np.float32)]
-
-    # Convert to TFLite fully quantized INT8
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    converter.representative_dataset = representative_dataset_gen
-    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-
-    if not float_io:
-        converter.inference_input_type = tf.int8
-        converter.inference_output_type = tf.int8
-
-    tflite_model = converter.convert()
-
-    # Save to temp path
-    with output_path.open("wb") as f:
-        f.write(tflite_model)
-
-
 @pytest.fixture
 def run_interpreter() -> Callable:
     """Fixture returning a function to run LiteRT/TFLite Interpreter on a model."""
@@ -375,26 +413,6 @@ def run_interpreter() -> Callable:
         return outputs
 
     return _run
-
-
-def export_float32_tflite_model(
-    input_shape: tuple[int, ...], model: keras.Model, output_path: Path
-):
-    """Export a Keras model to a float32 (unquantized) TFLite model.
-
-    Unlike ``export_quantized_tflite_model``, this applies no quantization.
-    The resulting model has all tensors in FLOAT32.
-
-    Args:
-        input_shape: Shape of the model input (excluding batch).
-        model: The Keras model to convert.
-        output_path: Where to save the .tflite file.
-    """
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
-    tflite_model = converter.convert()
-
-    with output_path.open("wb") as f:
-        f.write(tflite_model)
 
 
 @pytest.fixture

@@ -410,8 +410,8 @@ checklist:
   `op_test_utils` framework.
 - [ ] **Write or extend a network-level test** in `tests/networks/` that
   exercises the op in a real model, comparing Keras vs Interpreter outputs.
-- [ ] **Run linting**: `ruff check src/ tests/` and `ruff format src/ tests/`.
-- [ ] **Run all tests**: `.venv/bin/python -m pytest` — ensure nothing is
+- [ ] **Run linting AFTER CHANGES**: `ruff check src/ tests/` and `ruff format src/ tests/`.
+- [ ] **Run all tests AFTER CHANGES**: `.venv/bin/python -m pytest` — ensure nothing is
   broken.
 - [ ] **Update this file** if the change affects architecture or conventions.
 

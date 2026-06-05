@@ -3,6 +3,7 @@
 import keras
 
 from litert_tunner import flatbuffer, graph
+from litert_tunner.export import export_litert_model
 from litert_tunner.testing_utils import (
     assert_allclose_with_mismatch_tolerance,
     assert_cosine_similarity,
@@ -40,6 +41,7 @@ __all__ = [
     "assert_allclose_with_mismatch_tolerance",
     "assert_cosine_similarity",
     "cosine_similarity",
+    "export_litert_model",
     "load_model",
     "prepare_for_finetuning",
     "save_model",

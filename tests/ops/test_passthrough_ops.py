@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import keras
 import numpy as np
+import pytest
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry, reshape
-from tests.conftest import export_quantized_tflite_model
+from tests import conftest
 from tests.ops import op_test_utils
 
 # ===================================================================
@@ -373,7 +374,8 @@ class TestPack:
         op_test_utils.assert_layer_not_writable(layer)
 
 
-def test__passthrough_ops_integration(temp_model_dir, run_interpreter):
+@pytest.mark.parametrize("quantization", ["int8", "float32"])
+def test__passthrough_ops_integration(temp_model_dir, run_interpreter, quantization: str):
     keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(4, 4))
@@ -381,8 +383,14 @@ def test__passthrough_ops_integration(temp_model_dir, run_interpreter):
     model = keras.Model(inputs=inputs, outputs=x)
     input_shape = (1, 4, 4)
 
-    output_path = temp_model_dir / "passthrough_ops_integration.tflite"
-    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+    output_path = temp_model_dir / f"{quantization}_passthrough_ops_integration.tflite"
+    conftest.export_tflite_model(
+        input_shape=input_shape[1:],
+        model=model,
+        quantization=quantization,
+        float_io=True,
+        output_path=output_path,
+    )
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
