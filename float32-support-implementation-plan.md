@@ -455,7 +455,7 @@ ______________________________________________________________________
 - [x] `SOFTMAX`
 - [x] `MEAN`
 - [x] `CONCATENATION`
-- [ ] `NEG`
+- [x] `NEG`
 - [x] `RSQRT`
 - [x] `SQUARED_DIFFERENCE`
 - [ ] `RESIZE_NEAREST_NEIGHBOR`

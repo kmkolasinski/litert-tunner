@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import keras
+from keras import ops
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry, utils
@@ -98,8 +99,15 @@ class QuantizedNeg(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("NEG")
-def build_neg(
+class FloatNeg(keras.Layer):
+    """Float32 NEG — just applies ops.negative."""
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Forward pass for float32 negation."""
+        return ops.negative(x)
+
+
+def _build_quantized_neg(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
@@ -122,3 +130,23 @@ def build_neg(
         output_zero_point=output_zero_point,
         name=f"quantized_neg_{op.output_indices[0]}",
     )
+
+
+def _build_float_neg(
+    op: types.OperatorInfo,
+    _tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a FloatNeg layer from parsed TFLite operator info."""
+    return FloatNeg(name=f"float_neg_{op.output_indices[0]}")
+
+
+@registry.register_op("NEG")
+def build_neg(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build either a QuantizedNeg or FloatNeg layer."""
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_neg(op, tensors)
+    return _build_float_neg(op, tensors)

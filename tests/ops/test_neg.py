@@ -8,7 +8,7 @@ import pytest
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
-from tests.conftest import export_quantized_tflite_model
+from tests import conftest
 from tests.ops import op_test_utils
 
 
@@ -35,7 +35,7 @@ def neg_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
 
 
 @pytest.fixture
-def neg_setup_no_quant() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+def float_neg_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
     """Create a minimal NEG op with float32 I/O (no quantization params)."""
     input_tensor = op_test_utils.make_tensor(
         name="input_float32", index=0, shape=(1, 4), dtype=types.DTYPE_FLOAT32, quantization=None
@@ -155,39 +155,55 @@ class TestNegWriteOps:
         )
 
 
-class TestNegNoQuant:
-    def test__build_layer_no_quant_vars(
-        self, neg_setup_no_quant: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
-    ) -> None:
-        """Verify layer handles None quantization params during build."""
-        op, tensors = neg_setup_no_quant
+class TestFloatNegBuild:
+    def test__float_neg_build_returns_keras_layer(self, float_neg_setup):
+        """Builder must return a Keras layer for float32 inputs."""
+        op, tensors = float_neg_setup
         layer = op_test_utils.build_layer_from_registry(op, tensors)
-        assert getattr(layer, "input_quant", None) is None
-        assert getattr(layer, "output_quant", None) is None
+        assert isinstance(layer, keras.Layer)
 
-    def test__call_no_quant(
-        self, neg_setup_no_quant: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
-    ) -> None:
-        """Verify forward pass correctly operates on float tensors when quant params are None."""
-        op, tensors = neg_setup_no_quant
+    def test__float_neg_layer_name_contains_output_index(self, float_neg_setup):
+        """Layer name must end with output tensor index."""
+        op, tensors = float_neg_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        output_idx = op.output_indices[0]
+        assert layer.name.endswith(f"_{output_idx}")
+
+
+class TestFloatNegCall:
+    def test__float_neg_output_shape(self, float_neg_setup):
+        """Output shape must match expected shape."""
+        op, tensors = float_neg_setup
+        input_data = np.zeros((1, 4), dtype=np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_output_shape(output, (1, 4))
+
+    def test__float_neg_formula_matches_numpy(self, float_neg_setup):
+        """Float32 op output must match numpy reference computation."""
+        op, tensors = float_neg_setup
         input_data = np.array([[-5.0, 5.0, -15.0, 15.0]], dtype=np.float32)
-        _, output = op_test_utils.build_and_call(op, tensors, input_data)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
         expected = np.array([[5.0, -5.0, 15.0, -15.0]], dtype=np.float32)
         np.testing.assert_allclose(output, expected, atol=1e-5)
 
-    def test__write_ops_empty(
-        self, neg_setup_no_quant: tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]
-    ) -> None:
-        """Verify layer generates no quant write ops when quant params are None."""
-        op, tensors = neg_setup_no_quant
-        inputs = np.zeros((1, 4), dtype=np.float32)
-        layer, _ = op_test_utils.build_and_call(op, tensors, inputs)
-        op_test_utils.assert_collect_write_ops(
-            layer,
-            op,
-            expected_buffer_writes=0,
-            expected_quant_writes=0,
-        )
+
+class TestFloatNegTrainableWeights:
+    def test__float_neg_trainable_weights(self, float_neg_setup):
+        op, tensors = float_neg_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        op_test_utils.assert_trainable_weight_names(layer, set())
+
+    def test__float_neg_non_trainable_weights(self, float_neg_setup):
+        op, tensors = float_neg_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        op_test_utils.assert_non_trainable_weight_names(layer, set())
+
+
+class TestFloatNegWriteOps:
+    def test__float_neg_not_writable(self, float_neg_setup):
+        op, tensors = float_neg_setup
+        layer, _ = op_test_utils.build_and_call(op, tensors, np.zeros((1, 4), dtype=np.float32))
+        op_test_utils.assert_layer_not_writable(layer)
 
 
 def test__neg_integration(temp_model_dir, run_interpreter):
@@ -199,11 +215,30 @@ def test__neg_integration(temp_model_dir, run_interpreter):
     input_shape = (1, 4)
 
     output_path = temp_model_dir / "neg_integration.tflite"
-    export_quantized_tflite_model(input_shape[1:], model, True, output_path)
+    conftest.export_quantized_tflite_model(input_shape[1:], model, True, output_path)
 
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
 
+    op_test_utils.verify_model_contains_operator(output_path, "NEG")
+
+
+def test__float32_neg_integration(temp_model_dir, run_interpreter):
+    """Float32 NEG: load → predict → save → reload → compare."""
+    keras.utils.set_random_seed(42)
+
+    inputs = keras.Input(shape=(4,))
+    outputs = keras.ops.negative(inputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    input_shape = (1, 4)
+
+    output_path = temp_model_dir / "float32_neg_integration.tflite"
+    conftest.export_float32_tflite_model(input_shape[1:], model, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
     op_test_utils.verify_model_contains_operator(output_path, "NEG")
