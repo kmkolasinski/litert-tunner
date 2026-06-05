@@ -1,18 +1,23 @@
 from collections.abc import Callable
 
 import numpy as np
+import pytest
 
 import litert_tunner
 from litert_tunner import testing_utils
 
 
-def test__mlp_single_layer_forward(make_mlp_tflite: Callable, run_interpreter: Callable):
+@pytest.mark.parametrize("optimization", ["int8", "float32"])
+def test__mlp_single_layer_forward(
+    make_mlp_tflite: Callable, run_interpreter: Callable, optimization: str
+):
     model_path = make_mlp_tflite(
         input_size=4,
         hidden_sizes=[8],
         use_bias=True,
         activation="relu",
         float_io=True,
+        optimization=optimization,
     )
 
     rng = np.random.default_rng(42)
@@ -36,13 +41,17 @@ def test__mlp_single_layer_forward(make_mlp_tflite: Callable, run_interpreter: C
     np.testing.assert_allclose(litert_outputs, litert_saved_outputs, atol=1e-5)
 
 
-def test__mlp_multiple_layers_forward(make_mlp_tflite: Callable, run_interpreter: Callable):
+@pytest.mark.parametrize("optimization", ["int8", "float32"])
+def test__mlp_multiple_layers_forward(
+    make_mlp_tflite: Callable, run_interpreter: Callable, optimization: str
+):
     model_path = make_mlp_tflite(
         input_size=32,
         hidden_sizes=[32, 16, 8],
         use_bias=True,
         activation="swish",
         float_io=True,
+        optimization=optimization,
     )
 
     rng = np.random.default_rng(42)
@@ -66,8 +75,9 @@ def test__mlp_multiple_layers_forward(make_mlp_tflite: Callable, run_interpreter
     np.testing.assert_allclose(litert_outputs, litert_saved_outputs, atol=1e-5)
 
 
+@pytest.mark.parametrize("optimization", ["int8", "float32"])
 def test__mlp_multiple_layers_batchnorm_forward(
-    make_mlp_tflite: Callable, run_interpreter: Callable
+    make_mlp_tflite: Callable, run_interpreter: Callable, optimization: str
 ):
     """Test forward pass of MLP with Batch Normalization folding."""
     model_path = make_mlp_tflite(
@@ -77,6 +87,7 @@ def test__mlp_multiple_layers_batchnorm_forward(
         activation="relu",
         float_io=True,
         add_batchnorm=True,
+        optimization=optimization,
     )
 
     rng = np.random.default_rng(42)
@@ -100,8 +111,9 @@ def test__mlp_multiple_layers_batchnorm_forward(
     np.testing.assert_allclose(litert_outputs, litert_saved_outputs, atol=1e-5)
 
 
+@pytest.mark.parametrize("optimization", ["int8", "float32"])
 def test__mlp_multiple_layers_with_skip_connections_forward(
-    make_mlp_tflite: Callable, run_interpreter: Callable
+    make_mlp_tflite: Callable, run_interpreter: Callable, optimization: str
 ):
     model_path = make_mlp_tflite(
         input_size=32,
@@ -110,6 +122,7 @@ def test__mlp_multiple_layers_with_skip_connections_forward(
         activation="relu",
         float_io=True,
         add_skip_connections=True,
+        optimization=optimization,
     )
 
     rng = np.random.default_rng(42)

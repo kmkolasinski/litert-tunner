@@ -1,4 +1,7 @@
-"""DIV op implementation for litert_tunner."""
+"""DIV op implementation for litert_tunner.
+
+Supports both quantized (INT8) and float32 operations.
+"""
 
 from __future__ import annotations
 
@@ -165,8 +168,78 @@ class QuantizedDiv(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("DIV")
-def build_div(
+class FloatDiv(keras.Layer):
+    """Simulates TFLite's float32 DIV op.
+
+    The forward pass performs:
+        1. Divide in float32
+        2. Apply fused activation (if any)
+
+    This layer has no persistent weights to write back and emits no write ops.
+    """
+
+    def __init__(
+        self,
+        fused_activation: int = utils.FUSED_ACTIVATION_NONE,
+        constant_input: np.ndarray | None = None,
+        constant_input_index: int = -1,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._fused_activation = fused_activation
+        self._constant_input_data = constant_input
+        self._constant_input_index = constant_input_index
+
+    def build(self, input_shape: ShapeLike) -> None:
+        """Build the layer and create weights."""
+        if self._constant_input_data is not None:
+            self.constant_input = self.add_weight(
+                name="constant_input",
+                shape=self._constant_input_data.shape,
+                initializer=keras.initializers.Constant(
+                    typing.cast("float", self._constant_input_data.astype(np.float32))
+                ),
+                trainable=False,
+            )
+        super().build(input_shape)
+
+    def call(
+        self, inputs: TensorLike | tuple[TensorLike, TensorLike] | list[TensorLike]
+    ) -> TensorLike:
+        """Forward pass for float32 DIV."""
+        if self._constant_input_data is not None:
+            dynamic_input = inputs
+            if self._constant_input_index == 0:
+                x1, x2 = self.constant_input, dynamic_input
+            else:
+                x1, x2 = dynamic_input, self.constant_input
+        else:
+            x1, x2 = inputs
+
+        output_float = ops.divide(x1, x2)
+        return utils.apply_fused_activation(output_float, self._fused_activation)
+
+    def get_config(self):
+        """Get layer configuration."""
+        config = super().get_config()
+        config.update({
+            "fused_activation": self._fused_activation,
+        })
+        return config
+
+
+def _extract_float_constant(
+    input1_tensor: types.TensorInfo,
+    input2_tensor: types.TensorInfo,
+) -> tuple[np.ndarray | None, int]:
+    """Extract a constant float32 input tensor."""
+    for idx, tensor in enumerate([input1_tensor, input2_tensor]):
+        if tensor.data is not None:
+            return tensor.data.astype(np.float32), idx
+    return None, -1
+
+
+def _build_quantized_div(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
@@ -216,3 +289,35 @@ def build_div(
         constant_input_index=constant_input_index,
         name=f"quantized_div_{op.output_indices[0]}",
     )
+
+
+def _build_float_div(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a FloatDiv layer from parsed TFLite operator info."""
+    input1_tensor = tensors[op.input_indices[0]]
+    input2_tensor = tensors[op.input_indices[1]]
+
+    fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
+
+    constant_input, constant_input_index = _extract_float_constant(input1_tensor, input2_tensor)
+
+    return FloatDiv(
+        fused_activation=fused_activation,
+        constant_input=constant_input,
+        constant_input_index=constant_input_index,
+        name=f"float_div_{op.output_indices[0]}",
+    )
+
+
+@registry.register_op("DIV")
+def build_div(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a DIV layer from parsed TFLite operator info."""
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_div(op, tensors)
+    return _build_float_div(op, tensors)

@@ -442,16 +442,16 @@ ______________________________________________________________________
 
 ### Category B: Element-wise binary ops
 
-- [ ] `ADD`
-- [ ] `SUB`
-- [ ] `MUL`
-- [ ] `DIV`
+- [x] `ADD`
+- [x] `SUB`
+- [x] `MUL`
+- [x] `DIV`
 
 ### Category C: Unary / activation / reduction ops
 
 - [ ] `RELU`
 - [ ] `GELU`
-- [ ] `LOGISTIC`
+- [x] `LOGISTIC`
 - [ ] `SOFTMAX`
 - [ ] `MEAN`
 - [ ] `CONCATENATION`

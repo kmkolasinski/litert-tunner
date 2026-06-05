@@ -1,4 +1,7 @@
-"""LOGISTIC op implementation for litert_tunner."""
+"""LOGISTIC op implementation for litert_tunner.
+
+Supports both quantized (INT8) and float32 operations.
+"""
 
 from __future__ import annotations
 
@@ -89,8 +92,21 @@ class QuantizedLogistic(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("LOGISTIC")
-def build_logistic(
+class FloatLogistic(keras.Layer):
+    """Simulates TFLite's float32 LOGISTIC op.
+
+    The forward pass performs:
+        1. Apply sigmoid
+
+    This layer has no persistent weights to write back and emits no write ops.
+    """
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Forward pass for float32 LOGISTIC."""
+        return ops.sigmoid(x)
+
+
+def _build_quantized_logistic(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
@@ -112,3 +128,24 @@ def build_logistic(
         output_zero_point=float(output_quant.zero_points[0]),
         name=f"quantized_logistic_{op.output_indices[0]}",
     )
+
+
+def _build_float_logistic(
+    op: types.OperatorInfo,
+) -> keras.Layer:
+    """Build a FloatLogistic layer from parsed TFLite operator info."""
+    return FloatLogistic(
+        name=f"float_logistic_{op.output_indices[0]}",
+    )
+
+
+@registry.register_op("LOGISTIC")
+def build_logistic(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a LOGISTIC layer from parsed TFLite operator info."""
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_logistic(op, tensors)
+    return _build_float_logistic(op)

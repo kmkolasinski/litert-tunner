@@ -68,6 +68,7 @@ def make_mlp_tflite(temp_model_dir: Path) -> Callable:
         add_skip_connections: bool = False,
         add_batchnorm: bool = False,
         seed: int = 42,
+        optimization: str = "int8",
     ) -> Path:
         if hidden_sizes is None:
             hidden_sizes = [1]
@@ -102,9 +103,15 @@ def make_mlp_tflite(temp_model_dir: Path) -> Callable:
         sizes_str = "_".join(map(str, hidden_sizes))
         output_path = (
             temp_model_dir
-            / f"mlp_{sizes_str}_{activation}_{float_io}_{add_skip_connections}_{add_batchnorm}.tflite"  # noqa: E501
+            / f"mlp_{sizes_str}_{activation}_{float_io}_{add_skip_connections}_{add_batchnorm}_{optimization}.tflite"  # noqa: E501
         )
-        export_quantized_tflite_model((input_size,), model, float_io, output_path)
+        if optimization == "int8":
+            export_quantized_tflite_model((input_size,), model, float_io, output_path)
+        elif optimization == "float32":
+            export_float32_tflite_model((input_size,), model, output_path)
+        else:
+            msg = f"Unknown optimization: {optimization}"
+            raise ValueError(msg)
 
         return output_path
 
