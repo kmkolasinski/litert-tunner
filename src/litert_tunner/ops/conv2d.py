@@ -268,6 +268,120 @@ class QuantizedConv2D(keras.Layer, types.Writable):
         return buffer_writes, quant_writes
 
 
+class FloatConv2D(keras.Layer, types.Writable):
+    """Float32 Conv2D op without quantization params.
+
+    The forward pass performs:
+        1. Conv2D + float32 bias
+        2. Apply fused activation (if any)
+
+    Trainable parameters: kernel, bias.
+    Frozen parameters: (none).
+    """
+
+    def __init__(
+        self,
+        kernel_float: np.ndarray,
+        kernel_dtype: str,
+        bias_float: np.ndarray | None,
+        bias_dtype: str | None,
+        strides: tuple[int, int] = (1, 1),
+        padding: str = "same",
+        dilation_rate: tuple[int, int] = (1, 1),
+        fused_activation: int = utils.FUSED_ACTIVATION_NONE,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._kernel_float_data = kernel_float
+        self._kernel_dtype = kernel_dtype
+        self._bias_float_data = bias_float
+        self._bias_dtype = bias_dtype
+        self._strides = strides
+        self._padding = padding
+        self._dilation_rate = dilation_rate
+        self._fused_activation = fused_activation
+
+    def build(self, input_shape: ShapeLike) -> None:
+        """Create the weights (kernel, bias) for the layer."""
+        self.kernel = self.add_weight(
+            name="kernel",
+            shape=self._kernel_float_data.shape,
+            initializer=keras.initializers.Constant(typing.cast("float", self._kernel_float_data)),
+            trainable=True,
+        )
+
+        if self._bias_float_data is not None:
+            self.bias = self.add_weight(
+                name="bias",
+                shape=self._bias_float_data.shape,
+                initializer=keras.initializers.Constant(
+                    typing.cast("float", self._bias_float_data)
+                ),
+                trainable=True,
+            )
+        else:
+            self.bias = None
+
+        super().build(input_shape)
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Forward pass for float32 Conv2D."""
+        # Keras conv expects kernel shape (kH, kW, in_ch, out_ch) but TFLite stores
+        # weights as (out_ch, kH, kW, in_ch). Transpose to Keras format.
+        kernel_t = ops.transpose(self.kernel, (1, 2, 3, 0))
+        output = ops.conv(
+            x,
+            kernel_t,
+            strides=typing.cast("typing.Any", self._strides),
+            padding=self._padding,
+            dilation_rate=typing.cast("typing.Any", self._dilation_rate),
+        )
+
+        if self.bias is not None:
+            output = output + self.bias
+
+        return utils.apply_fused_activation(output, self._fused_activation)
+
+    def get_config(self):
+        """Return the configuration dictionary for serialization of the layer."""
+        config = super().get_config()
+        config.update({
+            "strides": self._strides,
+            "padding": self._padding,
+            "dilation_rate": self._dilation_rate,
+            "fused_activation": self._fused_activation,
+        })
+        return config
+
+    def collect_write_ops(
+        self,
+        op: types.OperatorInfo,
+    ) -> tuple[list[types.BufferWriteOp], list[types.QuantizationWriteOp]]:
+        """Return flatbuffer write instructions for the float32 Conv2D layer."""
+        buffer_writes: list[types.BufferWriteOp] = []
+        op_inputs = typing.cast("typing.Any", op.input_indices)
+
+        # Write kernel buffer
+        kernel_np = typing.cast("np.ndarray", ops.convert_to_numpy(self.kernel)).astype(
+            self._kernel_dtype
+        )
+        buffer_writes.append(
+            types.BufferWriteOp(tensor_index=op_inputs[1], data=bytes(kernel_np.tobytes()))
+        )
+
+        # Write bias buffer (if present)
+        bias_index = 2
+        if self.bias is not None and len(op_inputs) > bias_index and op_inputs[bias_index] >= 0:
+            bias_np = typing.cast("np.ndarray", ops.convert_to_numpy(self.bias)).astype(
+                self._bias_dtype
+            )
+            buffer_writes.append(
+                types.BufferWriteOp(tensor_index=op_inputs[2], data=bytes(bias_np.tobytes()))
+            )
+
+        return buffer_writes, []
+
+
 def _map_padding(padding_code: int) -> str:
     """Map TFLite padding integer code to Keras padding string.
 
@@ -286,37 +400,15 @@ def _map_padding(padding_code: int) -> str:
     return _PADDING_MAP[padding_code]
 
 
-@registry.register_op("CONV_2D")
-def build_conv2d(
+def _build_quantized_conv2d(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
-) -> keras.Layer:
-    """Build a QuantizedConv2D layer from parsed TFLite operator info.
-
-    TFLite Conv2D inputs:
-        [0] input tensor (INT8), shape (batch, H, W, C_in)
-        [1] weight tensor (INT8), shape (out_ch, kH, kW, C_in)
-        [2] bias tensor (INT32, optional)
-
-    TFLite Conv2D outputs:
-        [0] output tensor (INT8)
-
-    Args:
-        op: Parsed operator info with input/output indices and options.
-        tensors: All tensors in the graph.
-        graph_def: The parsed GraphDef.
-
-    Returns:
-        A configured QuantizedConv2D Keras layer.
-    """
+) -> QuantizedConv2D:
     input_tensor = tensors[op.input_indices[0]]
     weight_tensor = tensors[op.input_indices[1]]
     output_tensor = tensors[op.output_indices[0]]
 
-    # Weight data must be available
-    if weight_tensor.data is None:
-        msg = f"Weight tensor '{weight_tensor.name}' has no data"
-        raise ValueError(msg)
+    assert weight_tensor.data is not None  # noqa: S101
 
     # Extract quantization params
     input_quant = input_tensor.quantization
@@ -324,7 +416,7 @@ def build_conv2d(
     output_quant = output_tensor.quantization
 
     if input_quant is None or weight_quant is None or output_quant is None:
-        msg = "Conv2D requires quantized input, weight, and output tensors"
+        msg = "QuantizedConv2D requires quantized input, weight, and output tensors"
         raise ValueError(msg)
 
     output_channels = weight_tensor.shape[0]
@@ -363,3 +455,76 @@ def build_conv2d(
         fused_activation=fused_activation,
         name=f"quantized_conv2d_{op.output_indices[0]}",
     )
+
+
+def _build_float_conv2d(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> FloatConv2D:
+    weight_tensor = tensors[op.input_indices[1]]
+    assert weight_tensor.data is not None  # noqa: S101
+
+    kernel_float = weight_tensor.data.astype(np.float32)
+    kernel_dtype = weight_tensor.dtype
+
+    bias_float = utils.get_float32_bias(op, tensors, output_units=weight_tensor.shape[0])
+    bias_dtype = None
+    bias_index = 2
+    if len(op.input_indices) > bias_index and op.input_indices[bias_index] >= 0:
+        bias_tensor = tensors[op.input_indices[bias_index]]
+        bias_dtype = bias_tensor.dtype
+
+    fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
+    padding_code = op.options.get("Padding", _PADDING_SAME)
+    padding = _map_padding(padding_code)
+    stride_h = op.options.get("StrideH", 1)
+    stride_w = op.options.get("StrideW", 1)
+    dilation_h = op.options.get("DilationHFactor", 1)
+    dilation_w = op.options.get("DilationWFactor", 1)
+
+    return FloatConv2D(
+        kernel_float=kernel_float,
+        kernel_dtype=kernel_dtype,
+        bias_float=bias_float,
+        bias_dtype=bias_dtype,
+        strides=(stride_h, stride_w),
+        padding=padding,
+        dilation_rate=(dilation_h, dilation_w),
+        fused_activation=fused_activation,
+        name=f"float_conv2d_{op.output_indices[0]}",
+    )
+
+
+@registry.register_op("CONV_2D")
+def build_conv2d(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a QuantizedConv2D or FloatConv2D layer from parsed TFLite operator info.
+
+    TFLite Conv2D inputs:
+        [0] input tensor (INT8 or Float32), shape (batch, H, W, C_in)
+        [1] weight tensor (INT8 or Float32), shape (out_ch, kH, kW, C_in)
+        [2] bias tensor (INT32 or Float32, optional)
+
+    TFLite Conv2D outputs:
+        [0] output tensor (INT8 or Float32)
+
+    Args:
+        op: Parsed operator info with input/output indices and options.
+        tensors: All tensors in the graph.
+
+    Returns:
+        A configured Conv2D Keras layer.
+    """
+    input_tensor = tensors[op.input_indices[0]]
+    weight_tensor = tensors[op.input_indices[1]]
+
+    # Weight data must be available
+    if weight_tensor.data is None:
+        msg = f"Weight tensor '{weight_tensor.name}' has no data"
+        raise ValueError(msg)
+
+    if types.is_quantized(input_tensor):
+        return _build_quantized_conv2d(op, tensors)
+    return _build_float_conv2d(op, tensors)

@@ -133,6 +133,7 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
         add_batchnorm: bool = False,
         pooling_type: str | None = None,
         seed: int = 42,
+        optimization: str = "int8",
     ) -> Path:
         if filters is None:
             filters = [8, 8]
@@ -228,9 +229,15 @@ def make_resnet_tflite(temp_model_dir: Path) -> Callable:
         shape_str = "_".join(map(str, input_shape))
         output_path = (
             temp_model_dir
-            / f"resnet_{shape_str}_{filters_str}_{activation}_{float_io}_{add_skip_connections}_{add_batchnorm}_{pooling_type}.tflite"  # noqa: E501
+            / f"resnet_{shape_str}_{filters_str}_{activation}_{float_io}_{add_skip_connections}_{add_batchnorm}_{pooling_type}_{optimization}.tflite"  # noqa: E501
         )
-        export_quantized_tflite_model(input_shape, model, float_io, output_path)
+        if optimization == "int8":
+            export_quantized_tflite_model(input_shape, model, float_io, output_path)
+        elif optimization == "float32":
+            export_float32_tflite_model(input_shape, model, output_path)
+        else:
+            msg = f"Unknown optimization: {optimization}"
+            raise ValueError(msg)
 
         return output_path
 

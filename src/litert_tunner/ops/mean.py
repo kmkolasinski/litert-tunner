@@ -135,37 +135,47 @@ class QuantizedMean(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("MEAN")
-def build_mean(
+class FloatMean(keras.Layer):
+    """Float32 MEAN op without quantization params.
+
+    The forward pass performs:
+        1. Compute mean over specified axes
+    """
+
+    def __init__(
+        self,
+        axis: tuple[int, ...],
+        *,
+        keep_dims: bool,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._axis = axis
+        self._keep_dims = keep_dims
+
+    def call(self, x: TensorLike) -> TensorLike:
+        """Forward pass for float32 MEAN."""
+        return ops.mean(x, axis=self._axis, keepdims=self._keep_dims)
+
+    def get_config(self):
+        """Return the configuration dictionary for serialization of the layer."""
+        config = super().get_config()
+        config.update({
+            "axis": self._axis,
+            "keep_dims": self._keep_dims,
+        })
+        return config
+
+
+def _build_quantized_mean(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
-) -> keras.Layer:
-    """Build a QuantizedMean layer from parsed TFLite operator info.
-
-    TFLite MEAN inputs:
-        [0] input tensor (INT8)
-        [1] axis tensor (INT32, constant) — specifies reduction axes
-
-    TFLite MEAN outputs:
-        [0] output tensor (INT8)
-
-    Args:
-        op: Parsed operator info with input/output indices and options.
-        tensors: All tensors in the graph.
-        graph_def: The parsed GraphDef.
-
-    Returns:
-        A configured QuantizedMean Keras layer.
-    """
+) -> QuantizedMean:
     input_tensor = tensors[op.input_indices[0]]
     axis_tensor = tensors[op.input_indices[1]]
     output_tensor = tensors[op.output_indices[0]]
 
-    # Axis data must be available (constant tensor)
-    if axis_tensor.data is None:
-        msg = f"Axis tensor '{axis_tensor.name}' has no data"
-        raise ValueError(msg)
-
+    assert axis_tensor.data is not None  # noqa: S101
     axis = tuple(int(a) for a in axis_tensor.data.flatten())
 
     # Extract quantization params
@@ -173,7 +183,7 @@ def build_mean(
     output_quant = output_tensor.quantization
 
     if input_quant is None or output_quant is None:
-        msg = "MEAN requires quantized input and output tensors"
+        msg = "QuantizedMean requires quantized input and output tensors"
         raise ValueError(msg)
 
     keep_dims = bool(op.options.get("KeepDims", False))
@@ -187,3 +197,55 @@ def build_mean(
         output_zero_point=float(output_quant.zero_points[0]),
         name=f"quantized_mean_{op.output_indices[0]}",
     )
+
+
+def _build_float_mean(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> FloatMean:
+    axis_tensor = tensors[op.input_indices[1]]
+
+    assert axis_tensor.data is not None  # noqa: S101
+    axis = tuple(int(a) for a in axis_tensor.data.flatten())
+
+    keep_dims = bool(op.options.get("KeepDims", False))
+
+    return FloatMean(
+        axis=axis,
+        keep_dims=keep_dims,
+        name=f"float_mean_{op.output_indices[0]}",
+    )
+
+
+@registry.register_op("MEAN")
+def build_mean(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a QuantizedMean or FloatMean layer from parsed TFLite operator info.
+
+    TFLite MEAN inputs:
+        [0] input tensor (INT8 or Float32)
+        [1] axis tensor (INT32, constant) — specifies reduction axes
+
+    TFLite MEAN outputs:
+        [0] output tensor (INT8 or Float32)
+
+    Args:
+        op: Parsed operator info with input/output indices and options.
+        tensors: All tensors in the graph.
+
+    Returns:
+        A configured MEAN Keras layer.
+    """
+    input_tensor = tensors[op.input_indices[0]]
+    axis_tensor = tensors[op.input_indices[1]]
+
+    # Axis data must be available (constant tensor)
+    if axis_tensor.data is None:
+        msg = f"Axis tensor '{axis_tensor.name}' has no data"
+        raise ValueError(msg)
+
+    if types.is_quantized(input_tensor):
+        return _build_quantized_mean(op, tensors)
+    return _build_float_mean(op, tensors)

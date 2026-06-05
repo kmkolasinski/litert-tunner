@@ -11,6 +11,7 @@ from litert_tunner import testing_utils
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
 from tests import conftest
+from tests.conftest import export_float32_tflite_model
 from tests.ops import op_test_utils
 
 # ---------------------------------------------------------------------------
@@ -67,6 +68,57 @@ def conv2d_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
         shape=(1, 4, 4, 3),
         dtype=types.DTYPE_INT8,
         quantization=output_quant,
+    )
+
+    tensors = (input_tensor, weight_tensor, bias_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="CONV_2D",
+        input_indices=(0, 1, 2),
+        output_indices=(3,),
+        options={"Padding": 0, "StrideH": 1, "StrideW": 1},
+    )
+    return op, tensors
+
+
+@pytest.fixture
+def float_conv2d_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a minimal CONV_2D op with float32 I/O (no quantization)."""
+    input_tensor = op_test_utils.make_tensor(
+        name="input_f32",
+        index=0,
+        shape=(1, 4, 4, 2),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+    )
+
+    weight_data = np.array(
+        [
+            [[[1.0, 2.0]]],
+            [[[-1.0, -2.0]]],
+            [[[0.5, 0.5]]],
+        ],
+        dtype=np.float32,
+    )
+    weight_tensor = op_test_utils.make_tensor(
+        name="weight_f32",
+        index=1,
+        shape=(3, 1, 1, 2),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+        data=weight_data,
+    )
+
+    bias_data = np.array([0.1, -0.1, 0.0], dtype=np.float32)
+    bias_tensor = op_test_utils.make_tensor(
+        name="bias_f32", index=2, shape=(3,), dtype=types.DTYPE_FLOAT32, data=bias_data
+    )
+
+    output_tensor = op_test_utils.make_tensor(
+        name="output_f32",
+        index=3,
+        shape=(1, 4, 4, 3),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
     )
 
     tensors = (input_tensor, weight_tensor, bias_tensor, output_tensor)
@@ -236,6 +288,122 @@ class TestConv2DWriteOps:
 
 
 # ===================================================================
+# Float CONV_2D build tests
+# ===================================================================
+
+
+class TestFloatConv2DBuild:
+    def test__float_conv2d_build_returns_keras_layer(self, float_conv2d_setup):
+        """Builder must return a Keras layer for float32 inputs."""
+        op, tensors = float_conv2d_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        assert isinstance(layer, keras.Layer)
+
+    def test__float_conv2d_layer_name_contains_output_index(self, float_conv2d_setup):
+        """Layer name must end with output tensor index."""
+        op, tensors = float_conv2d_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        output_idx = op.output_indices[0]
+        assert layer.name.endswith(f"_{output_idx}")
+
+    def test__float_conv2d_build_raises_without_weights(self, float_conv2d_setup):
+        """Builder must raise if weight tensor has no data."""
+        op, tensors = float_conv2d_setup
+        tensors_list = list(tensors)
+        tensors_list[1] = op_test_utils.make_tensor(
+            name="weight_f32",
+            index=1,
+            shape=(3, 1, 1, 2),
+            dtype=types.DTYPE_FLOAT32,
+            quantization=None,
+            data=None,
+        )
+        with pytest.raises(ValueError, match="has no data"):
+            op_test_utils.build_layer_from_registry(op, tuple(tensors_list))
+
+
+# ===================================================================
+# Float CONV_2D call tests
+# ===================================================================
+
+
+class TestFloatConv2DCall:
+    def test__float_conv2d_output_shape(self, float_conv2d_setup):
+        """Output shape must match expected shape."""
+        op, tensors = float_conv2d_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (2, 4, 4, 2)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_output_shape(output, (2, 4, 4, 3))
+
+    def test__float_conv2d_formula_matches_numpy(self, float_conv2d_setup):
+        """Float32 op output must match numpy reference computation."""
+        op, tensors = float_conv2d_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (1, 4, 4, 2)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+
+        # 1x1 conv, so we can just matrix multiply along the last axis
+        weight_data = tensors[1].data
+        bias_data = tensors[2].data
+        w = weight_data.reshape(3, 2).T
+        expected = np.dot(input_data, w) + bias_data
+        np.testing.assert_allclose(output, expected, atol=1e-5)
+
+
+# ===================================================================
+# Float CONV_2D trainable weight tests
+# ===================================================================
+
+
+class TestFloatConv2DTrainableWeights:
+    def test__float_conv2d_trainable_weights(self, float_conv2d_setup):
+        op, tensors = float_conv2d_setup
+        dummy_input = np.zeros((1, 4, 4, 2), dtype=np.float32)
+        layer, _ = op_test_utils.build_and_call(op, tensors, dummy_input)
+        op_test_utils.assert_trainable_weight_names(layer, {"kernel", "bias"})
+
+    def test__float_conv2d_non_trainable_weights(self, float_conv2d_setup):
+        op, tensors = float_conv2d_setup
+        dummy_input = np.zeros((1, 4, 4, 2), dtype=np.float32)
+        layer, _ = op_test_utils.build_and_call(op, tensors, dummy_input)
+        op_test_utils.assert_non_trainable_weight_names(layer, set())
+
+
+# ===================================================================
+# Float CONV_2D write ops tests
+# ===================================================================
+
+
+class TestFloatConv2DWriteOps:
+    def test__float_conv2d_is_writable(self, float_conv2d_setup):
+        op, tensors = float_conv2d_setup
+        dummy_input = np.zeros((1, 4, 4, 2), dtype=np.float32)
+        layer, _ = op_test_utils.build_and_call(op, tensors, dummy_input)
+        op_test_utils.assert_layer_is_writable(layer)
+
+    def test__float_conv2d_write_ops_counts(self, float_conv2d_setup):
+        op, tensors = float_conv2d_setup
+        dummy_input = np.zeros((1, 4, 4, 2), dtype=np.float32)
+        layer, _ = op_test_utils.build_and_call(op, tensors, dummy_input)
+        op_test_utils.assert_collect_write_ops(
+            layer,
+            op,
+            expected_buffer_writes=2,
+            expected_quant_writes=0,
+        )
+
+    def test__float_conv2d_write_ops_buffer_indices(self, float_conv2d_setup):
+        op, tensors = float_conv2d_setup
+        dummy_input = np.zeros((1, 4, 4, 2), dtype=np.float32)
+        layer, _ = op_test_utils.build_and_call(op, tensors, dummy_input)
+        buffer_writes, _ = layer.collect_write_ops(op)
+        op_test_utils.assert_buffer_write_tensor_indices(
+            buffer_writes, {op.input_indices[1], op.input_indices[2]}
+        )
+
+
+# ===================================================================
 # Integration tests — Conv2D through make_resnet_tflite
 # ===================================================================
 
@@ -304,6 +472,25 @@ def test__conv2d_integration(temp_model_dir, run_interpreter):
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
 
+    op_test_utils.verify_model_contains_operator(output_path, "CONV_2D")
+
+
+def test__float32_conv2d_integration(temp_model_dir, run_interpreter):
+    """Float32 CONV_2D: load → predict → save → reload → compare."""
+    keras.utils.set_random_seed(42)
+
+    inputs = keras.Input(shape=(8, 8, 3))
+    outputs = keras.layers.Conv2D(8, 3)(inputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    input_shape = (1, 8, 8, 3)
+
+    output_path = temp_model_dir / "float32_conv2d_integration.tflite"
+    export_float32_tflite_model(input_shape[1:], model, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
     op_test_utils.verify_model_contains_operator(output_path, "CONV_2D")
 
 

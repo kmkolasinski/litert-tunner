@@ -6,7 +6,7 @@ import pytest
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
-from tests.conftest import export_quantized_tflite_model
+from tests.conftest import export_float32_tflite_model, export_quantized_tflite_model
 from tests.ops import op_test_utils
 
 # ---------------------------------------------------------------------------
@@ -83,6 +83,82 @@ def mean_keepdims_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, .
         shape=(1, 1, 1, 3),
         dtype=types.DTYPE_INT8,
         quantization=output_quant,
+    )
+
+    tensors = (input_tensor, axis_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="MEAN",
+        input_indices=(0, 1),
+        output_indices=(2,),
+        options={"KeepDims": True},
+    )
+    return op, tensors
+
+
+@pytest.fixture
+def float_mean_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a minimal MEAN op that reduces spatial dims [1, 2] with float32 I/O."""
+    input_tensor = op_test_utils.make_tensor(
+        name="input_f32",
+        index=0,
+        shape=(1, 4, 4, 3),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+    )
+
+    axis_data = np.array([1, 2], dtype=np.int32)
+    axis_tensor = op_test_utils.make_tensor(
+        name="axis",
+        index=1,
+        shape=(2,),
+        dtype=types.DTYPE_INT32,
+        data=axis_data,
+    )
+
+    output_tensor = op_test_utils.make_tensor(
+        name="output_f32",
+        index=2,
+        shape=(1, 3),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+    )
+
+    tensors = (input_tensor, axis_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="MEAN",
+        input_indices=(0, 1),
+        output_indices=(2,),
+        options={"KeepDims": False},
+    )
+    return op, tensors
+
+
+@pytest.fixture
+def float_mean_keepdims_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a float32 MEAN op with KeepDims=True."""
+    input_tensor = op_test_utils.make_tensor(
+        name="input_f32",
+        index=0,
+        shape=(1, 4, 4, 3),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+    )
+
+    axis_data = np.array([1, 2], dtype=np.int32)
+    axis_tensor = op_test_utils.make_tensor(
+        name="axis",
+        index=1,
+        shape=(2,),
+        dtype=types.DTYPE_INT32,
+        data=axis_data,
+    )
+
+    output_tensor = op_test_utils.make_tensor(
+        name="output_f32",
+        index=2,
+        shape=(1, 1, 1, 3),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
     )
 
     tensors = (input_tensor, axis_tensor, output_tensor)
@@ -239,6 +315,95 @@ class TestMeanWriteOps:
         )
 
 
+# ===================================================================
+# Float MEAN build tests
+# ===================================================================
+
+
+class TestFloatMeanBuild:
+    def test__float_mean_build_returns_keras_layer(self, float_mean_setup):
+        """Builder must return a Keras layer for float32 inputs."""
+        op, tensors = float_mean_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        assert isinstance(layer, keras.Layer)
+
+    def test__float_mean_layer_name_contains_output_index(self, float_mean_setup):
+        """Layer name must end with output tensor index."""
+        op, tensors = float_mean_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        output_idx = op.output_indices[0]
+        assert layer.name.endswith(f"_{output_idx}")
+
+
+# ===================================================================
+# Float MEAN call tests
+# ===================================================================
+
+
+class TestFloatMeanCall:
+    def test__float_mean_output_shape_no_keepdims(self, float_mean_setup):
+        """Output shape with KeepDims=False reduces spatial dims."""
+        op, tensors = float_mean_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (2, 4, 4, 3)).astype(np.float32)
+        _, output = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_output_shape(output, (2, 3))
+
+    def test__float_mean_output_shape_keepdims(self, float_mean_keepdims_setup):
+        """Output shape with KeepDims=True retains spatial dims as 1."""
+        op, tensors = float_mean_keepdims_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (2, 4, 4, 3)).astype(np.float32)
+        _, output = op_test_utils.build_and_call(op, tensors, input_data)
+        op_test_utils.assert_output_shape(output, (2, 1, 1, 3))
+
+    def test__float_mean_formula_matches_numpy(self, float_mean_setup):
+        """Float32 op output must match numpy reference computation."""
+        op, tensors = float_mean_setup
+        rng = np.random.default_rng(42)
+        input_data = rng.uniform(-1.0, 1.0, (2, 4, 4, 3)).astype(np.float32)
+        _layer, output = op_test_utils.build_and_call(op, tensors, input_data)
+
+        expected = np.mean(input_data, axis=(1, 2), keepdims=False)
+        np.testing.assert_allclose(output, expected, atol=1e-5)
+
+
+# ===================================================================
+# Float MEAN trainable weight tests
+# ===================================================================
+
+
+class TestFloatMeanTrainableWeights:
+    def test__float_mean_trainable_weights(self, float_mean_setup):
+        op, tensors = float_mean_setup
+        layer, _ = op_test_utils.build_and_call(
+            op, tensors, np.zeros((1, 4, 4, 3), dtype=np.float32)
+        )
+        op_test_utils.assert_trainable_weight_names(layer, set())
+
+    def test__float_mean_non_trainable_weights(self, float_mean_setup):
+        op, tensors = float_mean_setup
+        layer, _ = op_test_utils.build_and_call(
+            op, tensors, np.zeros((1, 4, 4, 3), dtype=np.float32)
+        )
+        op_test_utils.assert_non_trainable_weight_names(layer, set())
+
+
+# ===================================================================
+# Float MEAN write ops tests
+# ===================================================================
+
+
+class TestFloatMeanWriteOps:
+    def test__float_mean_not_writable(self, float_mean_setup):
+        """Float32 mean is not writable."""
+        op, tensors = float_mean_setup
+        layer, _ = op_test_utils.build_and_call(
+            op, tensors, np.zeros((1, 4, 4, 3), dtype=np.float32)
+        )
+        op_test_utils.assert_layer_not_writable(layer)
+
+
 def test__mean_integration(temp_model_dir, run_interpreter):
     keras.utils.set_random_seed(42)
 
@@ -255,4 +420,23 @@ def test__mean_integration(temp_model_dir, run_interpreter):
 
     op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
 
+    op_test_utils.verify_model_contains_operator(output_path, "MEAN")
+
+
+def test__float32_mean_integration(temp_model_dir, run_interpreter):
+    """Float32 MEAN: load → predict → save → reload → compare."""
+    keras.utils.set_random_seed(42)
+
+    inputs = keras.Input(shape=(8, 8, 3))
+    outputs = keras.layers.GlobalAveragePooling2D()(inputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    input_shape = (1, 8, 8, 3)
+
+    output_path = temp_model_dir / "float32_mean_integration.tflite"
+    export_float32_tflite_model(input_shape[1:], model, output_path)
+
+    rng = np.random.default_rng(42)
+    x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
+
+    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
     op_test_utils.verify_model_contains_operator(output_path, "MEAN")

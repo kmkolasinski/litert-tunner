@@ -437,7 +437,7 @@ ______________________________________________________________________
 ### Category A: Weighted ops
 
 - [x] `FULLY_CONNECTED` — done (reference implementation)
-- [ ] `CONV_2D`
+- [x] `CONV_2D`
 - [ ] `DEPTHWISE_CONV_2D`
 
 ### Category B: Element-wise binary ops
@@ -453,7 +453,7 @@ ______________________________________________________________________
 - [ ] `GELU`
 - [x] `LOGISTIC`
 - [ ] `SOFTMAX`
-- [ ] `MEAN`
+- [x] `MEAN`
 - [ ] `CONCATENATION`
 - [ ] `NEG`
 - [ ] `RSQRT`
