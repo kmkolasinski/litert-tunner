@@ -1,4 +1,7 @@
-"""ADD op implementation for litert_tunner."""
+"""ADD op implementation for litert_tunner.
+
+Supports both quantized (INT8) and float32 operations.
+"""
 
 from __future__ import annotations
 
@@ -123,6 +126,7 @@ class QuantizedAdd(keras.Layer, types.Writable):
         return self.output_quant.quantize(output_float)
 
     def get_config(self):
+        """Get layer configuration."""
         config = super().get_config()
         config.update({
             "input1_scale": self._input1_scale,
@@ -147,8 +151,78 @@ class QuantizedAdd(keras.Layer, types.Writable):
         return [], quant_writes
 
 
-@registry.register_op("ADD")
-def build_add(
+class FloatAdd(keras.Layer):
+    """Simulates TFLite's float32 ADD op.
+
+    The forward pass performs:
+        1. Add in float32
+        2. Apply fused activation (if any)
+
+    This layer has no persistent weights to write back and emits no write ops.
+    """
+
+    def __init__(
+        self,
+        fused_activation: int = utils.FUSED_ACTIVATION_NONE,
+        constant_input: np.ndarray | None = None,
+        constant_input_index: int = -1,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._fused_activation = fused_activation
+        self._constant_input_data = constant_input
+        self._constant_input_index = constant_input_index
+
+    def build(self, input_shape: ShapeLike) -> None:
+        """Build the layer and create weights."""
+        if self._constant_input_data is not None:
+            self.constant_input = self.add_weight(
+                name="constant_input",
+                shape=self._constant_input_data.shape,
+                initializer=keras.initializers.Constant(
+                    typing.cast("float", self._constant_input_data.astype(np.float32))
+                ),
+                trainable=False,
+            )
+        super().build(input_shape)
+
+    def call(
+        self, inputs: TensorLike | tuple[TensorLike, TensorLike] | list[TensorLike]
+    ) -> TensorLike:
+        """Forward pass for float32 ADD."""
+        if self._constant_input_data is not None:
+            dynamic_input = inputs
+            if self._constant_input_index == 0:
+                x1, x2 = self.constant_input, dynamic_input
+            else:
+                x1, x2 = dynamic_input, self.constant_input
+        else:
+            x1, x2 = inputs
+
+        output_float = ops.add(x1, x2)
+        return utils.apply_fused_activation(output_float, self._fused_activation)
+
+    def get_config(self):
+        """Get layer configuration."""
+        config = super().get_config()
+        config.update({
+            "fused_activation": self._fused_activation,
+        })
+        return config
+
+
+def _extract_float_constant(
+    input1_tensor: types.TensorInfo,
+    input2_tensor: types.TensorInfo,
+) -> tuple[np.ndarray | None, int]:
+    """Extract a constant float32 input tensor."""
+    for idx, tensor in enumerate([input1_tensor, input2_tensor]):
+        if tensor.data is not None:
+            return tensor.data.astype(np.float32), idx
+    return None, -1
+
+
+def _build_quantized_add(
     op: types.OperatorInfo,
     tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
@@ -184,3 +258,35 @@ def build_add(
         constant_input_index=constant_input_index,
         name=f"quantized_add_{op.output_indices[0]}",
     )
+
+
+def _build_float_add(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a FloatAdd layer from parsed TFLite operator info."""
+    input1_tensor = tensors[op.input_indices[0]]
+    input2_tensor = tensors[op.input_indices[1]]
+
+    fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
+
+    constant_input, constant_input_index = _extract_float_constant(input1_tensor, input2_tensor)
+
+    return FloatAdd(
+        fused_activation=fused_activation,
+        constant_input=constant_input,
+        constant_input_index=constant_input_index,
+        name=f"float_add_{op.output_indices[0]}",
+    )
+
+
+@registry.register_op("ADD")
+def build_add(
+    op: types.OperatorInfo,
+    tensors: tuple[types.TensorInfo, ...],
+) -> keras.Layer:
+    """Build a ADD layer from parsed TFLite operator info."""
+    input_tensor = tensors[op.input_indices[0]]
+    if types.is_quantized(input_tensor):
+        return _build_quantized_add(op, tensors)
+    return _build_float_add(op, tensors)
