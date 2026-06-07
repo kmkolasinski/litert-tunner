@@ -61,10 +61,10 @@ class Reshape(keras.Layer):
         """
         x = inputs[0] if isinstance(inputs, (list, tuple)) else inputs
 
-        batch_size = ops.shape(x)[0]
         if self._target_shape is not None:
-            full_shape = (batch_size, *self._target_shape)
+            full_shape = (-1, *self._target_shape)
         else:
+            batch_size = ops.shape(x)[0]
             full_shape = (batch_size, -1)
         return ops.reshape(x, full_shape)
 

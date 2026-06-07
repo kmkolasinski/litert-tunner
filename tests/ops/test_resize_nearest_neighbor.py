@@ -111,6 +111,26 @@ class TestResizeNearestNeighborCall:
         )
         np.testing.assert_allclose(output, expected, atol=1e-5)
 
+    def test__training_true_uses_repeat_path(self, resize_setup):
+        op, tensors = resize_setup
+        input_data = np.array([[[[1.0], [2.0]], [[3.0], [4.0]]]], dtype=np.float32)
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+
+        output = layer(input_data, training=True)
+
+        expected = np.array(
+            [
+                [
+                    [[1.0], [1.0], [2.0], [2.0]],
+                    [[1.0], [1.0], [2.0], [2.0]],
+                    [[3.0], [3.0], [4.0], [4.0]],
+                    [[3.0], [3.0], [4.0], [4.0]],
+                ]
+            ],
+            dtype=np.float32,
+        )
+        np.testing.assert_allclose(output, expected, atol=1e-5)
+
     def test__not_writable(self, resize_setup):
         op, tensors = resize_setup
         input_data = np.zeros((1, 2, 2, 3), dtype=np.float32)
@@ -123,9 +143,10 @@ def test__resize_nearest_neighbor_integration(temp_model_dir, run_interpreter, q
     keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(2, 2, 3))
-    # Use keras.ops.image.resize to map directly to RESIZE_NEAREST_NEIGHBOR without EXPAND_DIMS
-    outputs = keras.layers.Lambda(
-        lambda x: keras.ops.image.resize(x, [4, 4], interpolation="nearest")
+    outputs = keras.layers.Resizing(
+        height=4,
+        width=4,
+        interpolation="nearest",
     )(inputs)
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 2, 2, 3)

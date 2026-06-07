@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import keras
-from keras import ops
 
 from litert_tunner.ops import registry
 
@@ -34,8 +33,6 @@ class ResizeNearestNeighbor(keras.Layer):
     Args:
         target_height: Target height after resize.
         target_width: Target width after resize.
-        align_corners: Whether to align corners during resize.
-        half_pixel_centers: Whether to use half-pixel centers.
         name: Layer name.
     """
 
@@ -43,52 +40,27 @@ class ResizeNearestNeighbor(keras.Layer):
         self,
         target_height: int,
         target_width: int,
-        *,
-        align_corners: bool = False,
-        half_pixel_centers: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._target_height = target_height
         self._target_width = target_width
-        self._align_corners = align_corners
-        self._half_pixel_centers = half_pixel_centers
 
-    def call(self, x: TensorLike) -> TensorLike:
-        """Forward pass performing nearest-neighbor resize."""
-        input_height = ops.shape(x)[1]
-        input_width = ops.shape(x)[2]
+    def call(self, inputs: TensorLike, *, training: bool | None = None) -> TensorLike:
+        if training:
+            # https://github.com/keras-team/keras/issues/294
+            # Use `ops.repeat` for `nearest` interpolation to enable XLA
+            input_shape = keras.ops.shape(inputs)
+            height_factor = self._target_height // input_shape[1]
+            width_factor = self._target_width // input_shape[2]
+            x = keras.ops.repeat(inputs, height_factor, axis=1)
+            return keras.ops.repeat(x, width_factor, axis=2)
 
-        y_indices = ops.arange(self._target_height, dtype="float32")
-        x_indices = ops.arange(self._target_width, dtype="float32")
-
-        height_scale = ops.cast(input_height, "float32") / ops.cast(self._target_height, "float32")
-        width_scale = ops.cast(input_width, "float32") / ops.cast(self._target_width, "float32")
-
-        if self._align_corners and self._target_height > 1:
-            height_scale = ops.cast(input_height - 1, "float32") / ops.cast(
-                self._target_height - 1, "float32"
-            )
-        if self._align_corners and self._target_width > 1:
-            width_scale = ops.cast(input_width - 1, "float32") / ops.cast(
-                self._target_width - 1, "float32"
-            )
-
-        if self._half_pixel_centers:
-            y_coords = ops.floor((y_indices + 0.5) * height_scale)
-            x_coords = ops.floor((x_indices + 0.5) * width_scale)
-        elif self._align_corners:
-            y_coords = ops.round(y_indices * height_scale)
-            x_coords = ops.round(x_indices * width_scale)
-        else:
-            y_coords = ops.floor(y_indices * height_scale)
-            x_coords = ops.floor(x_indices * width_scale)
-
-        y_coords = ops.cast(ops.clip(y_coords, 0.0, ops.cast(input_height - 1, "float32")), "int32")
-        x_coords = ops.cast(ops.clip(x_coords, 0.0, ops.cast(input_width - 1, "float32")), "int32")
-
-        output = ops.take(x, y_coords, axis=1)
-        return ops.take(output, x_coords, axis=2)
+        return keras.ops.image.resize(
+            inputs,
+            size=(self._target_height, self._target_width),
+            interpolation="nearest",
+        )
 
     def get_config(self):
         """Return the configuration dictionary for serialization."""
@@ -96,8 +68,6 @@ class ResizeNearestNeighbor(keras.Layer):
         config.update({
             "target_height": self._target_height,
             "target_width": self._target_width,
-            "align_corners": self._align_corners,
-            "half_pixel_centers": self._half_pixel_centers,
         })
         return config
 
@@ -132,13 +102,21 @@ def build_resize_nearest_neighbor(
     target_height = int(size_tensor.data.flat[0])
     target_width = int(size_tensor.data.flat[1])
 
-    align_corners = op.options.get("AlignCorners", False)
-    half_pixel_centers = op.options.get("HalfPixelCenters", False)
+    align_corners = op.options.get("AlignCorners")
+    half_pixel_centers = op.options.get("HalfPixelCenters")
+
+    if align_corners:
+        msg = f"align_corners={align_corners} in ResizeNearestNeighbor op is not supported"
+        raise NotImplementedError(msg)
+
+    if half_pixel_centers is False:
+        msg = (
+            f"half_pixel_centers={half_pixel_centers} in ResizeNearestNeighbor op is not supported"
+        )
+        raise NotImplementedError(msg)
 
     return ResizeNearestNeighbor(
         target_height=target_height,
         target_width=target_width,
-        align_corners=align_corners,
-        half_pixel_centers=half_pixel_centers,
         name=f"resize_nn_{op.output_indices[0]}",
     )

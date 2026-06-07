@@ -21,6 +21,7 @@ def export_litert_model(
     representative_dataset: RepresentativeDataset | None = None,
     run_debugger: Literal[False] = False,
     denylisted_ops: None = None,
+    denylisted_nodes: None = None,
 ) -> Path: ...
 
 
@@ -34,6 +35,7 @@ def export_litert_model(
     representative_dataset: RepresentativeDataset | None = None,
     run_debugger: Literal[True],
     denylisted_ops: list[str] | None = None,
+    denylisted_nodes: list[str] | None = None,
 ) -> tuple[Path, "tf.lite.experimental.QuantizationDebugger"]: ...
 
 
@@ -46,6 +48,7 @@ def export_litert_model(
     representative_dataset: RepresentativeDataset | None = None,
     run_debugger: bool = False,
     denylisted_ops: list[str] | None = None,
+    denylisted_nodes: list[str] | None = None,
 ) -> Path | tuple[Path, "tf.lite.experimental.QuantizationDebugger"]:
     """Export a Keras model to a TFLite model.
 
@@ -59,13 +62,16 @@ def export_litert_model(
         run_debugger: If True, run the TFLite QuantizationDebugger and save stats.
             Only supported for int8 quantization. Defaults to False.
         denylisted_ops: List of ops to exclude from quantization.
+        denylisted_nodes: List of nodes to exclude from quantization.
 
     Returns:
         The path to the exported .tflite model. If run_debugger is True, also
         returns the QuantizationDebugger instance.
     """
-    if denylisted_ops and not run_debugger:
-        raise ValueError("denylisted_ops can only be provided when run_debugger is True")
+    if (denylisted_ops or denylisted_nodes) and not run_debugger:
+        raise ValueError(
+            "denylisted_ops and denylisted_nodes can only be provided when run_debugger is True"
+        )
     if quantization == "int8" and representative_dataset is None:
         raise ValueError("representative_dataset must be provided for int8 quantization")
     if quantization == "float32" and run_debugger:
@@ -80,7 +86,7 @@ def export_litert_model(
         case "int8":
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
             converter.representative_dataset = representative_dataset
-            if denylisted_ops:
+            if denylisted_ops or denylisted_nodes:
                 converter.target_spec.supported_ops = [
                     tf.lite.OpsSet.TFLITE_BUILTINS_INT8,
                     tf.lite.OpsSet.TFLITE_BUILTINS,
@@ -99,7 +105,10 @@ def export_litert_model(
 
     debugger = None
     if run_debugger:
-        debug_options = tf.lite.experimental.QuantizationDebugOptions(denylisted_ops=denylisted_ops)
+        debug_options = tf.lite.experimental.QuantizationDebugOptions(
+            denylisted_ops=denylisted_ops,
+            denylisted_nodes=denylisted_nodes,
+        )
         debugger = tf.lite.experimental.QuantizationDebugger(
             converter=converter,
             debug_dataset=representative_dataset,

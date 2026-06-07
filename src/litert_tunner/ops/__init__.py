@@ -12,6 +12,7 @@ from litert_tunner.ops import (
     dense,
     depthwise_conv2d,
     div,
+    expand_dims,
     gelu,
     logistic,
     mean,
@@ -30,6 +31,7 @@ from litert_tunner.ops import (
     squared_difference,
     strided_slice,
     sub,
+    tile,
     transpose,
     utils,
 )
@@ -41,6 +43,7 @@ __all__ = [
     "dense",
     "depthwise_conv2d",
     "div",
+    "expand_dims",
     "gelu",
     "logistic",
     "mean",
@@ -59,6 +62,7 @@ __all__ = [
     "squared_difference",
     "strided_slice",
     "sub",
+    "tile",
     "transpose",
     "utils",
 ]

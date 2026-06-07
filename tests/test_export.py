@@ -119,12 +119,35 @@ def test__export_int8_denylisted_ops(dummy_model: keras.Model, tmp_path: Path, r
     assert isinstance(debugger, tf.lite.experimental.QuantizationDebugger)
 
 
+def test__export_int8_denylisted_nodes(dummy_model: keras.Model, tmp_path: Path, rep_dataset: Any):
+    """Test exporting with denylisted_nodes via debugger."""
+    model_path, debugger = export.export_litert_model(
+        dummy_model,
+        tmp_path,
+        quantization="int8",
+        representative_dataset=rep_dataset,
+        run_debugger=True,
+        denylisted_nodes=["StatefulPartitionedCall/sequential/dense/MatMul"],
+    )
+    assert model_path.exists()
+    assert (tmp_path / "quantization_stats.csv").exists()
+
+    assert isinstance(debugger, tf.lite.experimental.QuantizationDebugger)
+
+
 def test__export_denylisted_ops_without_debugger_raises(dummy_model: keras.Model, tmp_path: Path):
     """Test ValueError raised when denylisted_ops provided without debugger."""
-    msg = "denylisted_ops can only be provided when run_debugger is True"
+    msg = "denylisted_ops and denylisted_nodes can only be provided when run_debugger is True"
     with pytest.raises(ValueError, match=msg):
         export.export_litert_model(
             dummy_model,
             tmp_path,
             denylisted_ops=["CONV_2D"],  # type: ignore  # noqa: PGH003
+        )
+
+    with pytest.raises(ValueError, match=msg):
+        export.export_litert_model(
+            dummy_model,
+            tmp_path,
+            denylisted_nodes=["StatefulPartitionedCall/sequential/dense/MatMul"],  # type: ignore  # noqa: PGH003
         )
