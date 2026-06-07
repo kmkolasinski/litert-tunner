@@ -69,6 +69,25 @@ def export_float32_tflite_model(
         f.write(tflite_model)
 
 
+def export_float16_tflite_model(
+    input_shape: tuple[int, ...], model: keras.Model, output_path: Path
+):
+    """Export a Keras model to a float16 optimized TFLite model.
+
+    Args:
+        input_shape: Shape of the model input (excluding batch).
+        model: The Keras model to convert.
+        output_path: Where to save the .tflite file.
+    """
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    converter.target_spec.supported_types = [tf.float16]
+    tflite_model = converter.convert()
+
+    with output_path.open("wb") as f:
+        f.write(tflite_model)
+
+
 def export_tflite_model(
     *,
     input_shape: tuple[int, ...],
@@ -82,6 +101,8 @@ def export_tflite_model(
         export_quantized_tflite_model(input_shape, model, float_io, output_path)
     elif quantization == "float32":
         export_float32_tflite_model(input_shape, model, output_path)
+    elif quantization == "float16":
+        export_float16_tflite_model(input_shape, model, output_path)
     else:
         msg = f"Unknown quantization: {quantization}"
         raise ValueError(msg)
@@ -444,3 +465,17 @@ def make_float32_dense_tflite(temp_model_dir: Path) -> Callable:
         return output_path
 
     return _make
+
+
+@pytest.fixture
+def compute_gradient() -> Callable:
+    """Fixture returning a function to compute gradient of a function with respect to its inputs."""
+
+    def _compute(func: Callable, inputs: Any) -> np.ndarray:
+        x = tf.constant(np.asarray(keras.ops.convert_to_numpy(inputs)), dtype=tf.float32)
+        with tf.GradientTape() as tape:
+            tape.watch(x)
+            y = func(x)
+        return np.asarray(keras.ops.convert_to_numpy(tape.gradient(y, x)))
+
+    return _compute

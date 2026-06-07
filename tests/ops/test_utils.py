@@ -6,7 +6,6 @@ import typing
 
 import numpy as np
 import pytest
-import tensorflow as tf
 from keras import ops
 
 from litert_tunner.graph import types
@@ -167,17 +166,16 @@ def test__compute_requantize_multiplier():
     np.testing.assert_allclose(res, expected)
 
 
-def test__round_ste():
+def test__round_ste(compute_gradient: typing.Callable):
     """Verify _round_ste returns rounded values forward and passes gradients backward."""
-    x = tf.constant([1.2, 2.7, -0.6], dtype=tf.float32)
-    with tf.GradientTape() as tape:
-        tape.watch(x)
-        y = utils._round_ste(x)
+    x_val = [1.2, 2.7, -0.6]
+
+    grads = compute_gradient(utils._round_ste, x_val)
+    y = utils._round_ste(ops.convert_to_tensor(x_val))
 
     np.testing.assert_allclose(_to_numpy(y), [1.0, 3.0, -1.0])
-    grads = tape.gradient(y, x)
     # STE: gradient is identity (all ones)
-    np.testing.assert_allclose(_to_numpy(grads), [1.0, 1.0, 1.0])
+    np.testing.assert_allclose(grads, [1.0, 1.0, 1.0])
 
 
 def test__softplus_inverse_roundtrip():
@@ -190,30 +188,31 @@ def test__softplus_inverse_roundtrip():
     np.testing.assert_allclose(recovered, scales, rtol=1e-6)
 
 
-def test__quantize_ste():
+def test__quantize_ste(compute_gradient: typing.Callable):
     """Verify quantize_ste simulates quantization and propagates gradients.
 
     Gradients are zeroed for saturated values (outside [-128, 127] after
     round + shift) thanks to hard clip, and are 1/scale for in-range values.
     """
-    x = tf.constant([-1.2, -0.2, 0.3, 1.4], dtype=tf.float32)
+    x_val = [-1.2, -0.2, 0.3, 1.4]
     scale = 0.05
     zero_point = -10.0
 
-    with tf.GradientTape() as tape:
-        tape.watch(x)
-        y = utils.quantize_ste(x, scale, zero_point)
+    def func(x):
+        return utils.quantize_ste(x, scale, zero_point)
+
+    grads = compute_gradient(func, x_val)
+    y = func(ops.convert_to_tensor(x_val))
 
     # Replicate forward
-    expected = np.clip(np.round(_to_numpy(x) / scale) + zero_point, -128.0, 127.0)
+    expected = np.clip(np.round(np.array(x_val) / scale) + zero_point, -128.0, 127.0)
     np.testing.assert_allclose(_to_numpy(y), expected, atol=1e-5)
 
-    grads = tape.gradient(y, x)
     # Hard clip: gradient is 1/scale for in-range values, 0 for saturated
-    raw_shifted = np.round(_to_numpy(x) / scale) + zero_point
+    raw_shifted = np.round(np.array(x_val) / scale) + zero_point
     in_range = (raw_shifted >= -128.0) & (raw_shifted <= 127.0)
     expected_grads = np.where(in_range, 1.0 / scale, 0.0)
-    np.testing.assert_allclose(_to_numpy(grads), expected_grads, atol=1e-5)
+    np.testing.assert_allclose(grads, expected_grads, atol=1e-5)
 
 
 def test__dequantize_ste():
@@ -227,44 +226,46 @@ def test__dequantize_ste():
     np.testing.assert_allclose(_to_numpy(y), expected, atol=1e-5)
 
 
-def test__fake_quantize():
+def test__fake_quantize(compute_gradient: typing.Callable):
     """Verify _fake_quantize helper performs quantize and then dequantize."""
-    x = tf.constant([-1.2, -0.2, 0.3, 1.4], dtype=tf.float32)
+    x_val = [-1.2, -0.2, 0.3, 1.4]
     scale = 0.05
     zero_point = -10.0
 
-    with tf.GradientTape() as tape:
-        tape.watch(x)
-        y = utils.fake_quantize(x, scale, zero_point)
+    def func(x):
+        return utils.fake_quantize(x, scale, zero_point)
+
+    grads = compute_gradient(func, x_val)
+    y = func(ops.convert_to_tensor(x_val))
 
     # Replicate forward
-    q = np.clip(np.round(_to_numpy(x) / scale) + zero_point, -128.0, 127.0)
+    q = np.clip(np.round(np.array(x_val) / scale) + zero_point, -128.0, 127.0)
     expected = scale * (q - zero_point)
     np.testing.assert_allclose(_to_numpy(y), expected, atol=1e-5)
 
-    grads = tape.gradient(y, x)
     # STE gradient is constant one
-    np.testing.assert_allclose(_to_numpy(grads), [1.0, 1.0, 1.0, 1.0])
+    np.testing.assert_allclose(grads, [1.0, 1.0, 1.0, 1.0])
 
 
-def test__fake_quantize_bias():
+def test__fake_quantize_bias(compute_gradient: typing.Callable):
     """Verify fake_quantize_bias simulates INT32 bias quantization and passes gradients."""
-    bias = tf.constant([0.15, -0.3, 0.05], dtype=tf.float32)
+    bias_val = [0.15, -0.3, 0.05]
     input_scale = 0.5
     weight_scale = np.array([0.1, 0.2, 0.1])
     bias_scale = input_scale * weight_scale
 
-    with tf.GradientTape() as tape:
-        tape.watch(bias)
-        y = utils.fake_quantize_bias(bias, input_scale, weight_scale)
+    def func(b):
+        return utils.fake_quantize_bias(b, input_scale, weight_scale)
+
+    grads = compute_gradient(func, bias_val)
+    y = func(ops.convert_to_tensor(bias_val))
 
     # Replicate forward
-    expected = np.round(_to_numpy(bias) / bias_scale) * bias_scale
+    expected = np.round(np.array(bias_val) / bias_scale) * bias_scale
     np.testing.assert_allclose(_to_numpy(y), expected, atol=1e-5)
 
-    grads = tape.gradient(y, bias)
     # STE grad = 1.0
-    np.testing.assert_allclose(_to_numpy(grads), [1.0, 1.0, 1.0])
+    np.testing.assert_allclose(grads, [1.0, 1.0, 1.0])
 
 
 def test__to_float_list():
@@ -328,14 +329,11 @@ def test__quantize_to_int8_ste_forward():
     np.testing.assert_allclose(result, expected)
 
 
-def test__quantize_to_int8_ste_gradient():
+def test__quantize_to_int8_ste_gradient(compute_gradient: typing.Callable):
     """Verify STE gradients: identity in range, zero outside."""
-    x = tf.constant([0.5, -129.0, 130.0, 42.3], dtype=tf.float32)
-    with tf.GradientTape() as tape:
-        tape.watch(x)
-        y = utils.quantize_to_int8_ste(x)
+    x_val = [0.5, -129.0, 130.0, 42.3]
 
-    grads = _to_numpy(tape.gradient(y, x))
+    grads = compute_gradient(utils.quantize_to_int8_ste, x_val)
     # In-range values get gradient 1, out-of-range get 0
     np.testing.assert_allclose(grads, [1.0, 0.0, 0.0, 1.0])
 

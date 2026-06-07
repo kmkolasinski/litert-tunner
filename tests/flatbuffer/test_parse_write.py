@@ -1,9 +1,8 @@
 import keras
-import numpy as np
 import pytest
-import tensorflow as tf
 
 from litert_tunner.flatbuffer import parser, writer
+from tests import conftest
 
 
 def create_mlp_model():
@@ -46,23 +45,12 @@ def create_efficientnet_model():
 
 
 def convert_to_tflite_int8(model, path):
-    rng = np.random.default_rng(42)
-
-    def representative_dataset():
-        input_shape = [1 if d is None else d for d in model.input_shape]
-        for _ in range(10):
-            yield [rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)]
-
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    converter.representative_dataset = representative_dataset
-    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-    converter.inference_input_type = tf.int8
-    converter.inference_output_type = tf.int8
-    tflite_model = converter.convert()
-
-    with path.open("wb") as f:
-        f.write(tflite_model)
+    conftest.export_quantized_tflite_model(
+        input_shape=model.input_shape[1:],
+        model=model,
+        float_io=False,
+        output_path=path,
+    )
 
 
 @pytest.fixture(scope="module")

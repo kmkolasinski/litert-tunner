@@ -6,12 +6,12 @@ from pathlib import Path
 import keras
 import numpy as np
 import pytest
-import tensorflow as tf
 import tflite
 
 from litert_tunner import flatbuffer
 from litert_tunner.flatbuffer import parser
 from litert_tunner.graph import types
+from tests import conftest
 
 
 class TestParseTfliteBasic:
@@ -494,13 +494,12 @@ class TestParseTfliteFloat16:
         model = keras.Model(inputs=inputs, outputs=x)
 
         # 2. Export to float16 TFLite
-        converter = tf.lite.TFLiteConverter.from_keras_model(model)
-        converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        converter.target_spec.supported_types = [tf.float16]
-        tflite_model = converter.convert()
-
         model_path = tmp_path / "float16.tflite"
-        model_path.write_bytes(tflite_model)
+        conftest.export_float16_tflite_model(
+            input_shape=(4,),
+            model=model,
+            output_path=model_path,
+        )
 
         # 3. Parse the model
         graph_def = parser.parse_tflite(model_path)

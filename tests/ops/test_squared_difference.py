@@ -5,7 +5,6 @@ from __future__ import annotations
 import keras
 import numpy as np
 import pytest
-import tensorflow as tf
 
 from litert_tunner.graph import types
 from litert_tunner.ops import registry
@@ -239,8 +238,10 @@ def test__squared_difference_integration(temp_model_dir, run_interpreter, quanti
     inputs = keras.Input(shape=(4,))
     x = keras.layers.Dense(4)(inputs)
     y = keras.layers.Dense(4)(inputs)
-    # Using tf operation to ensure it maps to SquaredDifference
-    outputs = keras.layers.Lambda(lambda args: tf.math.squared_difference(args[0], args[1]))([x, y])
+    # Using keras operations to ensure it maps to SquaredDifference
+    outputs = keras.layers.Lambda(
+        lambda args: keras.ops.square(keras.ops.subtract(args[0], args[1]))
+    )([x, y])
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 4)
 

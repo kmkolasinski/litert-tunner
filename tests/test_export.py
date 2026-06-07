@@ -12,6 +12,7 @@ import keras
 import numpy as np
 import pytest
 import tensorflow as tf
+from ai_edge_litert.interpreter import Interpreter
 
 from litert_tunner import export
 
@@ -49,7 +50,7 @@ def test__export_float32(dummy_model: keras.Model, tmp_path: Path):
     assert model_path.name == "model.tflite"
 
     # Verify I/O is float32
-    interp = tf.lite.Interpreter(model_path=str(model_path))
+    interp = Interpreter(model_path=str(model_path))
     interp.allocate_tensors()
     assert interp.get_input_details()[0]["dtype"] == np.float32
 
@@ -75,7 +76,7 @@ def test__export_int8_float_io(dummy_model: keras.Model, tmp_path: Path, rep_dat
     path_float = export.export_litert_model(
         dummy_model, tmp_path / "float_io", representative_dataset=rep_dataset, float_io=True
     )
-    interp_float = tf.lite.Interpreter(model_path=str(path_float))
+    interp_float = Interpreter(model_path=str(path_float))
     interp_float.allocate_tensors()
     assert interp_float.get_input_details()[0]["dtype"] == np.float32
 
@@ -83,7 +84,7 @@ def test__export_int8_float_io(dummy_model: keras.Model, tmp_path: Path, rep_dat
     path_int8 = export.export_litert_model(
         dummy_model, tmp_path / "int8_io", representative_dataset=rep_dataset, float_io=False
     )
-    interp_int8 = tf.lite.Interpreter(model_path=str(path_int8))
+    interp_int8 = Interpreter(model_path=str(path_int8))
     interp_int8.allocate_tensors()
     assert interp_int8.get_input_details()[0]["dtype"] == np.int8
 

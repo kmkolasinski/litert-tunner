@@ -7,10 +7,11 @@ Writable protocol compliance.
 
 from __future__ import annotations
 
+import typing
+
 import keras
 import numpy as np
 import pytest
-import tensorflow as tf
 from keras import ops
 
 from litert_tunner.graph import types
@@ -582,7 +583,7 @@ class TestQuantizeLayer:
         # The layer outputs float32 values that are within INT8 range
         assert np.allclose(y_np, q_np.astype(np.float32), atol=1e-5)
 
-    def test__quantize_layer_ste_gradient(self):
+    def test__quantize_layer_ste_gradient(self, compute_gradient: typing.Callable):
         """Verify that gradients flow through the Quantize layer using STE."""
         layer = quantize_op.Quantize(scale=0.1, zero_point=0.0)
 
@@ -590,14 +591,14 @@ class TestQuantizeLayer:
         outputs = layer(inputs)
         model = keras.Model(inputs=inputs, outputs=outputs)
 
-        x_tensor = tf.constant([[0.15, -0.25, 0.05]], dtype="float32")
-        with tf.GradientTape() as tape:
-            tape.watch(x_tensor)
-            y_tensor = model(x_tensor)
-            loss = tf.reduce_sum(y_tensor**2)
+        x_val = [[0.15, -0.25, 0.05]]
 
-        grads = tape.gradient(loss, x_tensor)
-        grads_np = np.asarray(ops.convert_to_numpy(grads))
+        def func(x):
+            return ops.sum(model(x) ** 2)
+
+        grads_np = compute_gradient(func, x_val)
+        y_tensor = model(ops.convert_to_tensor(x_val))
+
         # STE gradient of quantize: d/dx [round(x/scale) + zp] = 1/scale
         # So d(loss)/dx = 2 * y_tensor * (1/scale)
         expected_grads = np.asarray(ops.convert_to_numpy(2 * y_tensor / 0.1))
