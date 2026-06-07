@@ -68,6 +68,8 @@ pip install litert-tunner
 
 ## Quickstart
 
+### Standard Fine-Tuning
+
 ```python
 import litert_tunner
 
@@ -86,6 +88,29 @@ model.fit(x_train, y_train, epochs=5)
 
 # 5. Export — writes updated parameters back into the flatbuffer
 litert_tunner.save_model(model, "model_int8_finetuned.tflite")
+```
+
+### Distillation Fine-Tuning (Recommended)
+
+```python
+import litert_tunner
+
+# 1. Load an INT8 LiteRT model → trainable Keras replica
+tunner_model = litert_tunner.load_model("model_int8.tflite")
+
+# 2. Prepare for fine-tuning
+litert_tunner.prepare_for_finetuning(tunner_model, trainable_pattern=".*bias")
+
+# 3. Fine-tune using the Trainer wrapper (handles distillation and weight drift)
+trainer = litert_tunner.Trainer(
+    student_model=tunner_model,
+    teacher_model=teacher_model,  # The original float32 model
+)
+trainer.compile(optimizer="adam", loss="mse")
+trainer.fit(train_ds, validation_data=val_ds, epochs=5)
+
+# 5. Export — writes updated parameters back into the flatbuffer
+litert_tunner.save_model(tunner_model, "model_int8_finetuned.tflite")
 ```
 
 For a complete, runnable end-to-end example with a real dataset, see the

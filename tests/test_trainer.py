@@ -15,20 +15,20 @@ def test__trainer_finetuning_e2e(temp_model_dir, caplog):
     inputs = keras.Input(shape=input_shape)
     x = keras.layers.Dense(8, activation="relu")(inputs)
     outputs = keras.layers.Dense(2, activation=None)(x)
-    base_model = keras.Model(inputs=inputs, outputs=outputs)
+    teacher_model = keras.Model(inputs=inputs, outputs=outputs)
 
     # 2. Export it to INT8 TFLite
     output_path = temp_model_dir / "test_trainer_model.tflite"
     conftest.export_quantized_tflite_model(
-        input_shape, base_model, float_io=True, output_path=output_path
+        input_shape, teacher_model, float_io=True, output_path=output_path
     )
 
     # 3. Load the model via litert_tunner
-    litert_model = litert_tunner.load_model(str(output_path))
+    student_model = litert_tunner.load_model(str(output_path))
 
     # 4. Prepare for fine-tuning (freeze weights, unfreeze biases and scales)
     with caplog.at_level(logging.INFO):
-        litert_tunner.prepare_for_finetuning(litert_model)
+        litert_tunner.prepare_for_finetuning(student_model)
 
     # Verify that the variables taken for training were logged
     assert len(caplog.records) > 0
@@ -50,13 +50,13 @@ def test__trainer_finetuning_e2e(temp_model_dir, caplog):
 
     # Verify trainability (only biases and scales should be trainable)
     trainable_count = 0
-    for v in litert_model.trainable_weights:
+    for v in student_model.trainable_weights:
         assert v.path.endswith("/bias") or v.path.endswith("/weight_scale")
         trainable_count += 1
     assert trainable_count > 0, "No trainable variables found after preparation."
 
     non_trainable_count = 0
-    for v in litert_model.non_trainable_weights:
+    for v in student_model.non_trainable_weights:
         assert not v.path.endswith("/bias")
         assert not v.path.endswith("/weight_scale")
         non_trainable_count += 1
@@ -72,8 +72,8 @@ def test__trainer_finetuning_e2e(temp_model_dir, caplog):
         return keras.ops.mean(keras.ops.sum(y_p * y_t, axis=1))  # pyright: ignore[reportReturnType]
 
     trainer = litert_tunner.Trainer(
-        litert_model=litert_model,
-        base_model=base_model,
+        student_model=student_model,
+        teacher_model=teacher_model,
         l2_weight_decay=0.01,
         extra_metrics={"similarity": cosine_similarity},
     )

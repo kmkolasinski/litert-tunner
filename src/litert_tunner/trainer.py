@@ -30,8 +30,8 @@ class Trainer(keras.Model):
 
     def __init__(
         self,
-        litert_model: keras.Model,
-        base_model: keras.Model,
+        student_model: keras.Model,
+        teacher_model: keras.Model,
         distillation_loss_fn: MetricFunc | None = None,
         l2_weight_decay: float = 0.01,
         extra_metrics: Mapping[str, MetricFunc] | None = None,
@@ -40,8 +40,8 @@ class Trainer(keras.Model):
         """Initializes the trainer.
 
         Args:
-            litert_model: The student model (typically the quantized model from litert_tunner).
-            base_model: The teacher model (the original unquantized model).
+            student_model: The student model (typically the quantized model from litert_tunner).
+            teacher_model: The teacher model (the original unquantized model).
             distillation_loss_fn: A callable to compute the loss between the student
                 and teacher outputs. Defaults to Mean Squared Error (MSE).
             l2_weight_decay: Strength of the L2 weight drift penalty.
@@ -50,9 +50,9 @@ class Trainer(keras.Model):
             **kwargs: Additional arguments passed to `keras.Model`.
         """
         super().__init__(**kwargs)
-        self.litert_model = litert_model
-        self.base_model = base_model
-        self.base_model.trainable = False
+        self.student_model = student_model
+        self.teacher_model = teacher_model
+        self.teacher_model.trainable = False
 
         self.distillation_loss_fn = distillation_loss_fn or self._default_mse_loss
         self.l2_weight_decay = l2_weight_decay
@@ -60,7 +60,7 @@ class Trainer(keras.Model):
 
         # Store original trainable variables for L2 weight drift loss
         self.original_variables = {
-            v.path: ops.convert_to_tensor(v.numpy()) for v in self.litert_model.trainable_weights
+            v.path: ops.convert_to_tensor(v.numpy()) for v in self.student_model.trainable_weights
         }
 
         # Metric trackers
@@ -89,7 +89,7 @@ class Trainer(keras.Model):
 
     def call(self, inputs: DataStruct, training: bool = False) -> DataStruct:  # noqa: FBT001, FBT002
         """Forward pass of the student model."""
-        return self.litert_model(inputs, training=training)
+        return self.student_model(inputs, training=training)
 
     def compute_loss(
         self,
@@ -99,7 +99,7 @@ class Trainer(keras.Model):
         sample_weight: DataStruct | None = None,
     ) -> TensorLike:
         """Computes the total loss including distillation and L2 weight drift."""
-        teacher_outputs = ops.stop_gradient(self.base_model(x, training=False))
+        teacher_outputs = ops.stop_gradient(self.teacher_model(x, training=False))
 
         # Compute distillation loss
         distill_loss = self.distillation_loss_fn(y_pred, teacher_outputs)  # pyright: ignore[reportArgumentType]
@@ -107,7 +107,7 @@ class Trainer(keras.Model):
         # Compute L2 weight drift loss
         l2_loss = 0.0
         if self.l2_weight_decay > 0.0:
-            for v in self.litert_model.trainable_weights:
+            for v in self.student_model.trainable_weights:
                 if v.path in self.original_variables:
                     original_v = self.original_variables[v.path]
                     l2_loss += self.l2_weight_decay * ops.mean(
@@ -142,7 +142,7 @@ class Trainer(keras.Model):
         """Computes all metrics, including extra custom metrics."""
         # Compute custom extra metrics
         if self.extra_metrics_fns:
-            teacher_outputs = ops.stop_gradient(self.base_model(x, training=False))
+            teacher_outputs = ops.stop_gradient(self.teacher_model(x, training=False))
             for name, metric_fn in self.extra_metrics_fns.items():
                 val = metric_fn(y_pred, teacher_outputs)  # pyright: ignore[reportArgumentType]
                 self.extra_metric_trackers[name].update_state(val)
