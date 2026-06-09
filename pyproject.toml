@@ -140,7 +140,8 @@ convention = "google"
 [tool.bumpversion]
 current_version = "0.1.0"
 commit = true
-tag = false
+tag = true
+tag_name = "v{new_version}"
 allow_dirty = false
 
 [[tool.bumpversion.files]]

@@ -41,3 +41,15 @@ clean: ## Removes test artifacts and cache directories
 	rm -f .coverage
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
+
+release-patch: ## Bump patch version, commit, tag, and push
+	bump-my-version bump patch
+	git push origin main --follow-tags
+
+release-minor: ## Bump minor version, commit, tag, and push
+	bump-my-version bump minor
+	git push origin main --follow-tags
+
+release-major: ## Bump major version, commit, tag, and push
+	bump-my-version bump major
+	git push origin main --follow-tags
