@@ -9,7 +9,7 @@ from litert_tunner.testing_utils import (
 )
 from litert_tunner.trainer import Trainer, cosine_similarity, prepare_for_finetuning
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def load_model(path: str) -> keras.Model:
