@@ -45,7 +45,8 @@ def test__export_int8_missing_dataset(dummy_model: keras.Model, tmp_path: Path):
 
 def test__export_float32(dummy_model: keras.Model, tmp_path: Path):
     """Test successful float32 export without dataset."""
-    model_path = export.export_litert_model(dummy_model, tmp_path, quantization="float32")
+    model_path, debugger = export.export_litert_model(dummy_model, tmp_path, quantization="float32")
+    assert debugger is None
     assert model_path.exists()
     assert model_path.name == "model.tflite"
 
@@ -63,9 +64,10 @@ def test__export_float32_debugger_raises(dummy_model: keras.Model, tmp_path: Pat
 
 def test__export_int8_success(dummy_model: keras.Model, tmp_path: Path, rep_dataset: Any):
     """Test successful INT8 export."""
-    model_path = export.export_litert_model(
+    model_path, debugger = export.export_litert_model(
         dummy_model, tmp_path, quantization="int8", representative_dataset=rep_dataset
     )
+    assert debugger is None
     assert model_path.exists()
     assert not (tmp_path / "quantization_stats.csv").exists()
 
@@ -73,17 +75,19 @@ def test__export_int8_success(dummy_model: keras.Model, tmp_path: Path, rep_data
 def test__export_int8_float_io(dummy_model: keras.Model, tmp_path: Path, rep_dataset: Any):
     """Test float_io flag correctly sets input/output types."""
     # Test float_io=True (default is float32 I/O for INT8)
-    path_float = export.export_litert_model(
+    path_float, debugger1 = export.export_litert_model(
         dummy_model, tmp_path / "float_io", representative_dataset=rep_dataset, float_io=True
     )
+    assert debugger1 is None
     interp_float = Interpreter(model_path=str(path_float))
     interp_float.allocate_tensors()
     assert interp_float.get_input_details()[0]["dtype"] == np.float32
 
     # Test float_io=False (INT8 I/O for INT8)
-    path_int8 = export.export_litert_model(
+    path_int8, debugger2 = export.export_litert_model(
         dummy_model, tmp_path / "int8_io", representative_dataset=rep_dataset, float_io=False
     )
+    assert debugger2 is None
     interp_int8 = Interpreter(model_path=str(path_int8))
     interp_int8.allocate_tensors()
     assert interp_int8.get_input_details()[0]["dtype"] == np.int8

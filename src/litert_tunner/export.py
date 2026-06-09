@@ -1,6 +1,6 @@
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Literal, TypeAlias, overload
+from typing import Literal, TypeAlias
 
 import keras
 import numpy as np
@@ -9,34 +9,6 @@ import tensorflow as tf
 RepresentativeDataset: TypeAlias = Callable[
     [], tf.data.Dataset | Iterable[list[np.ndarray] | dict[str, np.ndarray]]
 ]
-
-
-@overload
-def export_litert_model(
-    model: keras.Model,
-    export_dir: str | Path,
-    *,
-    quantization: Literal["int8", "float32"] = "int8",
-    float_io: bool = True,
-    representative_dataset: RepresentativeDataset | None = None,
-    run_debugger: Literal[False] = False,
-    denylisted_ops: None = None,
-    denylisted_nodes: None = None,
-) -> Path: ...
-
-
-@overload
-def export_litert_model(
-    model: keras.Model,
-    export_dir: str | Path,
-    *,
-    quantization: Literal["int8", "float32"] = "int8",
-    float_io: bool = True,
-    representative_dataset: RepresentativeDataset | None = None,
-    run_debugger: Literal[True],
-    denylisted_ops: list[str] | None = None,
-    denylisted_nodes: list[str] | None = None,
-) -> tuple[Path, "tf.lite.experimental.QuantizationDebugger"]: ...
 
 
 def export_litert_model(
@@ -49,7 +21,7 @@ def export_litert_model(
     run_debugger: bool = False,
     denylisted_ops: list[str] | None = None,
     denylisted_nodes: list[str] | None = None,
-) -> Path | tuple[Path, "tf.lite.experimental.QuantizationDebugger"]:
+) -> tuple[Path, "tf.lite.experimental.QuantizationDebugger | None"]:
     """Export a Keras model to a TFLite model.
 
     Args:
@@ -65,8 +37,8 @@ def export_litert_model(
         denylisted_nodes: List of nodes to exclude from quantization.
 
     Returns:
-        The path to the exported .tflite model. If run_debugger is True, also
-        returns the QuantizationDebugger instance.
+        A tuple containing the path to the exported .tflite model and the
+        QuantizationDebugger instance (if run_debugger is True, otherwise None).
     """
     if (denylisted_ops or denylisted_nodes) and not run_debugger:
         raise ValueError(
@@ -125,6 +97,4 @@ def export_litert_model(
     tflite_model_filepath = export_dir / "model.tflite"
     tflite_model_filepath.write_bytes(tflite_model)
 
-    if run_debugger:
-        return tflite_model_filepath, debugger
-    return tflite_model_filepath
+    return tflite_model_filepath, debugger
