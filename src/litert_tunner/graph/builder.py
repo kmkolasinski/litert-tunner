@@ -4,6 +4,8 @@ Converts a parsed GraphDef into a Keras Functional model using registered
 op builders.
 """
 
+import re
+
 import keras
 
 from litert_tunner.graph import types
@@ -30,7 +32,10 @@ def build_keras_model(graph_def: types.GraphDef) -> keras.Model:
         # We use None for the batch dimension to allow flexible batch sizes during fine-tuning
         batch_shape = (None, *tensor.shape[1:]) if tensor.shape else (None,)
 
-        x = keras.Input(batch_shape=batch_shape, dtype="float32", name=tensor.name)
+        # Sanitize tensor name to avoid invalid node name errors in TFLiteConverter
+        safe_name = re.sub(r"[^A-Za-z0-9._/-]", "_", tensor.name) if tensor.name else None
+
+        x = keras.Input(batch_shape=batch_shape, dtype="float32", name=safe_name)
         tensor_symbols[idx] = x
 
     # 2. Build layers and connect them topologically
