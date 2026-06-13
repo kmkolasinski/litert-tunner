@@ -63,21 +63,22 @@ litert_tunner.save_model(model, "model_int8_finetuned.tflite")
 import litert_tunner
 
 # 1. Load an INT8 LiteRT model → trainable Keras replica
-tunner_model = litert_tunner.load_model("model_int8.tflite")
+student_model = litert_tunner.load_model("model_int8.tflite")
+teacher_model = litert_tunner.load_model("model_float32.tflite")
 
 # 2. Freeze everything except biases
-litert_tunner.prepare_for_finetuning(tunner_model, trainable_pattern=".*bias")
+litert_tunner.prepare_for_finetuning(student_model, trainable_pattern=".*bias")
 
 # 3. Fine-tune using Trainer (handles distillation & weight drift)
 trainer = litert_tunner.Trainer(
-    student_model=tunner_model,
+    student_model=student_model,
     teacher_model=teacher_model,  # Original float32 model
 )
 trainer.compile(optimizer="adam", loss="mse")
 trainer.fit(train_ds, validation_data=val_ds, epochs=5)
 
 # 4. Save updated parameters to flatbuffer
-litert_tunner.save_model(tunner_model, "model_int8_finetuned.tflite")
+litert_tunner.save_model(student_model, "model_int8_finetuned.tflite")
 ```
 
 ## Supported Operations

@@ -13,7 +13,7 @@ RepresentativeDataset: TypeAlias = Callable[
 
 def export_litert_model(
     model: keras.Model,
-    export_dir: str | Path,
+    save_path: str | Path,
     *,
     quantization: Literal["int8", "float32"] = "int8",
     float_io: bool = True,
@@ -21,12 +21,13 @@ def export_litert_model(
     run_debugger: bool = False,
     denylisted_ops: list[str] | None = None,
     denylisted_nodes: list[str] | None = None,
-) -> tuple[Path, "tf.lite.experimental.QuantizationDebugger | None"]:
+) -> "tf.lite.experimental.QuantizationDebugger | None":
     """Export a Keras model to a TFLite model.
 
     Args:
         model: The Keras model to export.
-        export_dir: Directory where the exported model and stats will be saved.
+        save_path: Full path where the exported model.tflite will be saved. Stats will
+            be saved in the same directory.
         quantization: The quantization mode. Either "int8" or "float32". Defaults to "int8".
         float_io: If True, use float32 inputs/outputs even for int8 quantization. Defaults to True.
         representative_dataset: A generator yielding sample inputs for quantization.
@@ -37,8 +38,7 @@ def export_litert_model(
         denylisted_nodes: List of nodes to exclude from quantization.
 
     Returns:
-        A tuple containing the path to the exported .tflite model and the
-        QuantizationDebugger instance (if run_debugger is True, otherwise None).
+        The QuantizationDebugger instance (if run_debugger is True, otherwise None).
     """
     if (denylisted_ops or denylisted_nodes) and not run_debugger:
         raise ValueError(
@@ -72,8 +72,8 @@ def export_litert_model(
     converter.inference_input_type = io_type
     converter.inference_output_type = io_type
 
-    export_dir = Path(export_dir)
-    export_dir.mkdir(parents=True, exist_ok=True)
+    save_path = Path(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
 
     debugger = None
     if run_debugger:
@@ -89,12 +89,11 @@ def export_litert_model(
         debugger.run()
         tflite_model = debugger.get_nondebug_quantized_model()
 
-        with (export_dir / "quantization_stats.csv").open("w") as f:
+        with save_path.with_name("quantization_stats.csv").open("w") as f:
             debugger.layer_statistics_dump(f)
     else:
         tflite_model = converter.convert()
 
-    tflite_model_filepath = export_dir / "model.tflite"
-    tflite_model_filepath.write_bytes(tflite_model)
+    save_path.write_bytes(tflite_model)
 
-    return tflite_model_filepath, debugger
+    return debugger

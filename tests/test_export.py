@@ -40,12 +40,13 @@ def rep_dataset() -> Any:
 def test__export_int8_missing_dataset(dummy_model: keras.Model, tmp_path: Path):
     """Test ValueError raised when INT8 quantization missing representative dataset."""
     with pytest.raises(ValueError, match="representative_dataset must be provided"):
-        export.export_litert_model(dummy_model, tmp_path, quantization="int8")
+        export.export_litert_model(dummy_model, tmp_path / "model.tflite", quantization="int8")
 
 
 def test__export_float32(dummy_model: keras.Model, tmp_path: Path):
     """Test successful float32 export without dataset."""
-    model_path, debugger = export.export_litert_model(dummy_model, tmp_path, quantization="float32")
+    model_path = tmp_path / "model.tflite"
+    debugger = export.export_litert_model(dummy_model, model_path, quantization="float32")
     assert debugger is None
     assert model_path.exists()
     assert model_path.name == "model.tflite"
@@ -59,13 +60,16 @@ def test__export_float32(dummy_model: keras.Model, tmp_path: Path):
 def test__export_float32_debugger_raises(dummy_model: keras.Model, tmp_path: Path):
     """Test ValueError raised when debugger used with float32 quantization."""
     with pytest.raises(ValueError, match="Debugger only supported for int8 quantization"):
-        export.export_litert_model(dummy_model, tmp_path, quantization="float32", run_debugger=True)
+        export.export_litert_model(
+            dummy_model, tmp_path / "model.tflite", quantization="float32", run_debugger=True
+        )
 
 
 def test__export_int8_success(dummy_model: keras.Model, tmp_path: Path, rep_dataset: Any):
     """Test successful INT8 export."""
-    model_path, debugger = export.export_litert_model(
-        dummy_model, tmp_path, quantization="int8", representative_dataset=rep_dataset
+    model_path = tmp_path / "model.tflite"
+    debugger = export.export_litert_model(
+        dummy_model, model_path, quantization="int8", representative_dataset=rep_dataset
     )
     assert debugger is None
     assert model_path.exists()
@@ -75,8 +79,9 @@ def test__export_int8_success(dummy_model: keras.Model, tmp_path: Path, rep_data
 def test__export_int8_float_io(dummy_model: keras.Model, tmp_path: Path, rep_dataset: Any):
     """Test float_io flag correctly sets input/output types."""
     # Test float_io=True (default is float32 I/O for INT8)
-    path_float, debugger1 = export.export_litert_model(
-        dummy_model, tmp_path / "float_io", representative_dataset=rep_dataset, float_io=True
+    path_float = tmp_path / "float_io" / "model.tflite"
+    debugger1 = export.export_litert_model(
+        dummy_model, path_float, representative_dataset=rep_dataset, float_io=True
     )
     assert debugger1 is None
     interp_float = Interpreter(model_path=str(path_float))
@@ -84,8 +89,9 @@ def test__export_int8_float_io(dummy_model: keras.Model, tmp_path: Path, rep_dat
     assert interp_float.get_input_details()[0]["dtype"] == np.float32
 
     # Test float_io=False (INT8 I/O for INT8)
-    path_int8, debugger2 = export.export_litert_model(
-        dummy_model, tmp_path / "int8_io", representative_dataset=rep_dataset, float_io=False
+    path_int8 = tmp_path / "int8_io" / "model.tflite"
+    debugger2 = export.export_litert_model(
+        dummy_model, path_int8, representative_dataset=rep_dataset, float_io=False
     )
     assert debugger2 is None
     interp_int8 = Interpreter(model_path=str(path_int8))
@@ -95,9 +101,10 @@ def test__export_int8_float_io(dummy_model: keras.Model, tmp_path: Path, rep_dat
 
 def test__export_int8_with_debugger(dummy_model: keras.Model, tmp_path: Path, rep_dataset: Any):
     """Test running debugger dumps stats and returns debugger instance."""
-    model_path, debugger = export.export_litert_model(
+    model_path = tmp_path / "model.tflite"
+    debugger = export.export_litert_model(
         dummy_model,
-        tmp_path,
+        model_path,
         quantization="int8",
         representative_dataset=rep_dataset,
         run_debugger=True,
@@ -110,9 +117,10 @@ def test__export_int8_with_debugger(dummy_model: keras.Model, tmp_path: Path, re
 
 def test__export_int8_denylisted_ops(dummy_model: keras.Model, tmp_path: Path, rep_dataset: Any):
     """Test exporting with denylisted_ops via debugger."""
-    model_path, debugger = export.export_litert_model(
+    model_path = tmp_path / "model.tflite"
+    debugger = export.export_litert_model(
         dummy_model,
-        tmp_path,
+        model_path,
         quantization="int8",
         representative_dataset=rep_dataset,
         run_debugger=True,
@@ -126,9 +134,10 @@ def test__export_int8_denylisted_ops(dummy_model: keras.Model, tmp_path: Path, r
 
 def test__export_int8_denylisted_nodes(dummy_model: keras.Model, tmp_path: Path, rep_dataset: Any):
     """Test exporting with denylisted_nodes via debugger."""
-    model_path, debugger = export.export_litert_model(
+    model_path = tmp_path / "model.tflite"
+    debugger = export.export_litert_model(
         dummy_model,
-        tmp_path,
+        model_path,
         quantization="int8",
         representative_dataset=rep_dataset,
         run_debugger=True,
@@ -146,13 +155,13 @@ def test__export_denylisted_ops_without_debugger_raises(dummy_model: keras.Model
     with pytest.raises(ValueError, match=msg):
         export.export_litert_model(
             dummy_model,
-            tmp_path,
+            tmp_path / "model.tflite",
             denylisted_ops=["CONV_2D"],  # type: ignore  # noqa: PGH003
         )
 
     with pytest.raises(ValueError, match=msg):
         export.export_litert_model(
             dummy_model,
-            tmp_path,
+            tmp_path / "model.tflite",
             denylisted_nodes=["StatefulPartitionedCall/sequential/dense/MatMul"],  # type: ignore  # noqa: PGH003
         )

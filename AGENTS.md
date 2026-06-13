@@ -16,23 +16,17 @@ graph topology.
 
 ```python
 import litert_tunner
+from litert_tunner import distillation
 
-# Load an INT8 LiteRT model and get a trainable Keras replica
 tunner_model = litert_tunner.load_model("model_int8.tflite")
-
-# Inference — should match LiteRT Interpreter output
 predictions = tunner_model.predict(inputs)
-
-# Fine-tune using the Trainer wrapper (handles freeze/unfreeze, metrics)
-litert_tunner.prepare_for_finetuning(tunner_model, trainable_pattern=".*bias")
-trainer = litert_tunner.Trainer(
+distillation.prepare_for_finetuning(tunner_model, trainable_pattern=".*bias")
+trainer = distillation.Trainer(
     student_model=tunner_model,
     teacher_model=teacher_model,  # The original float32 model
 )
 trainer.compile(optimizer=..., loss=..., metrics=...)
 trainer.fit(train_ds, validation_data=val_ds, epochs=5)
-
-# Export — writes updated parameters back into the flatbuffer
 litert_tunner.save_model(tunner_model, "model_int8_finetuned.tflite")
 ```
 
@@ -122,10 +116,14 @@ Key functions used across all op implementations (see source for full list):
 
 ```text
 src/litert_tunner/
-├── __init__.py              # Public API: load_model, save_model, Trainer, etc.
+├── __init__.py              # Public API: load_model, save_model, distillation, etc.
 ├── logging.py               # Logging configuration utilities
 ├── testing_utils.py         # Public testing helpers (cosine similarity, allclose)
-├── trainer.py               # Trainer wrapper + prepare_for_finetuning
+├── distillation/            # Fine-tuning utilities and trainer
+│   ├── __init__.py          # Exports Trainer, losses, metrics, prepare_for_finetuning
+│   ├── trainer.py           # Trainer wrapper + prepare_for_finetuning
+│   ├── losses.py            # kl_loss, mse_loss
+│   └── metrics.py           # cosine_similarity_metric
 ├── flatbuffer/              # Flatbuffer parsing & serialization
 │   ├── __init__.py          # Re-exports parse_tflite, save_tflite
 │   ├── parser.py            # Parse .tflite → GraphDef
@@ -175,7 +173,10 @@ tests/
 ├── test_finetuning_e2e.py       # Fine-tune bias → verify loss decreases → save/reload
 ├── test_logging.py              # Logging module tests
 ├── test_testing_utils.py        # Testing utilities tests
-├── test_trainer.py              # Trainer wrapper tests
+├── distillation/
+│   ├── test_trainer.py      # Trainer wrapper tests
+│   ├── test_losses.py       # Distillation losses tests
+│   └── test_metrics.py      # Distillation metrics tests
 ├── flatbuffer/
 │   ├── test_parser.py       # Flatbuffer parser unit tests
 │   ├── test_writer.py       # Flatbuffer writer unit tests

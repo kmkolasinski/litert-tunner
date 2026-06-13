@@ -1,12 +1,13 @@
 import re
 from collections.abc import Callable, Mapping
-from typing import Any, TypeAlias, cast
+from typing import Any, TypeAlias
 
 import keras
 import numpy as np
 from keras import ops
 
 from litert_tunner import logging
+from litert_tunner.distillation import losses
 
 logger = logging.get_logger()
 
@@ -54,7 +55,7 @@ class Trainer(keras.Model):
         self.teacher_model = teacher_model
         self.teacher_model.trainable = False
 
-        self.distillation_loss_fn = distillation_loss_fn or self._default_mse_loss
+        self.distillation_loss_fn = distillation_loss_fn or losses.mse_loss
         self.l2_weight_decay = l2_weight_decay
         self.extra_metrics_fns = extra_metrics or {}
 
@@ -81,11 +82,6 @@ class Trainer(keras.Model):
             self.l2_loss_tracker,
             *self.extra_metric_trackers.values(),
         ]
-
-    def _default_mse_loss(
-        self, student_outputs: TensorLike, teacher_outputs: TensorLike
-    ) -> keras.KerasTensor:
-        return ops.mean(ops.square(ops.subtract(student_outputs, teacher_outputs)))  # pyright: ignore[reportReturnType]
 
     def call(self, inputs: DataStruct, training: bool = False) -> DataStruct:  # noqa: FBT001, FBT002
         """Forward pass of the student model."""
@@ -203,23 +199,3 @@ def prepare_for_finetuning(
         total_params,
         (trainable_params / total_params * 100.0) if total_params > 0 else 0.0,
     )
-
-
-def cosine_similarity(y_pred: keras.KerasTensor, y_true: keras.KerasTensor) -> keras.KerasTensor:
-    """Computes the cosine similarity between the predicted and true outputs.
-
-    Args:
-        y_pred: The predicted outputs, of shape (batch_size, ...).
-        y_true: The true outputs, of shape (batch_size, ...).
-
-    Returns:
-        The cosine similarity between the predicted and true outputs.
-    """
-    y_pred_flat = keras.ops.reshape(y_pred, (keras.ops.shape(y_pred)[0], -1))
-    y_true_flat = keras.ops.reshape(y_true, (keras.ops.shape(y_true)[0], -1))
-
-    pred_norm = keras.ops.normalize(y_pred_flat, axis=-1)
-    true_norm = keras.ops.normalize(y_true_flat, axis=-1)
-
-    cosine_sim = keras.ops.mean(keras.ops.sum(pred_norm * true_norm, axis=-1))
-    return cast("keras.KerasTensor", cosine_sim)

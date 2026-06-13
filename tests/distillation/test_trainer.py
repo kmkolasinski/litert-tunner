@@ -1,10 +1,10 @@
 import logging
-from typing import Any
 
 import keras
 import numpy as np
 
 import litert_tunner
+from litert_tunner import distillation
 from tests import conftest
 
 
@@ -28,7 +28,7 @@ def test__trainer_finetuning_e2e(temp_model_dir, caplog):
 
     # 4. Prepare for fine-tuning (freeze weights, unfreeze biases and scales)
     with caplog.at_level(logging.INFO):
-        litert_tunner.prepare_for_finetuning(student_model)
+        distillation.prepare_for_finetuning(student_model)
 
     # Verify that the variables taken for training were logged
     assert len(caplog.records) > 0
@@ -63,19 +63,11 @@ def test__trainer_finetuning_e2e(temp_model_dir, caplog):
     assert non_trainable_count > 0, "No frozen weights found."
 
     # 5. Initialize the Trainer
-    def cosine_similarity(y_pred: Any, y_true: Any) -> keras.KerasTensor:
-        # Flatten and normalize
-        y_p = keras.ops.reshape(y_pred, (keras.ops.shape(y_pred)[0], -1))
-        y_t = keras.ops.reshape(y_true, (keras.ops.shape(y_true)[0], -1))
-        y_p = keras.ops.normalize(y_p, axis=1)
-        y_t = keras.ops.normalize(y_t, axis=1)
-        return keras.ops.mean(keras.ops.sum(y_p * y_t, axis=1))  # pyright: ignore[reportReturnType]
-
-    trainer = litert_tunner.Trainer(
+    trainer = distillation.Trainer(
         student_model=student_model,
         teacher_model=teacher_model,
         l2_weight_decay=0.01,
-        extra_metrics={"similarity": cosine_similarity},
+        extra_metrics={"similarity": distillation.cosine_similarity_metric},
     )
 
     trainer.compile(optimizer=keras.optimizers.Adam(learning_rate=0.01))

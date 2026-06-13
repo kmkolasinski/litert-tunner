@@ -501,11 +501,7 @@ def test__conv2d_weight_int8_trainable_save_roundtrip(
         pooling_type=None,
     )
 
-    # Load and make weight_int8 trainable
     keras_model = litert_tunner.load_model(str(model_path))
-    litert_tunner.prepare_for_finetuning(
-        keras_model, trainable_pattern=r".*(bias|weight_scale|weight_int8)$"
-    )
 
     # Perturb weight_int8 values slightly
     for v in keras_model.variables:
