@@ -61,7 +61,7 @@ class Trainer(keras.Model):
 
         # Store original trainable variables for L2 weight drift loss
         self.original_variables = {
-            v.path: ops.convert_to_tensor(v.numpy()) for v in self.student_model.trainable_weights
+            v.path: v.numpy().copy() for v in self.student_model.trainable_weights
         }
 
         # Metric trackers
@@ -96,6 +96,12 @@ class Trainer(keras.Model):
     ) -> TensorLike:
         """Computes the total loss including distillation and L2 weight drift."""
         teacher_outputs = ops.stop_gradient(self.teacher_model(x, training=False))
+
+        # Cache teacher outputs for compute_metrics to reuse.
+        # Under JAX JIT tracing, calling the teacher model a second time
+        # (in compute_metrics) causes non-trainable layer weights to resolve
+        # to None, triggering "'NoneType' object is not callable" errors.
+        self._cached_teacher_outputs = teacher_outputs
 
         # Compute distillation loss
         distill_loss = self.distillation_loss_fn(y_pred, teacher_outputs)  # pyright: ignore[reportArgumentType]
@@ -136,9 +142,11 @@ class Trainer(keras.Model):
         sample_weight: DataStruct | None = None,
     ) -> TensorLike:
         """Computes all metrics, including extra custom metrics."""
-        # Compute custom extra metrics
+        # Reuse teacher outputs cached by compute_loss to avoid calling the
+        # teacher model twice per step (breaks under JAX JIT tracing and is
+        # wasteful even on other backends).
         if self.extra_metrics_fns:
-            teacher_outputs = ops.stop_gradient(self.teacher_model(x, training=False))
+            teacher_outputs = self._cached_teacher_outputs
             for name, metric_fn in self.extra_metrics_fns.items():
                 val = metric_fn(y_pred, teacher_outputs)  # pyright: ignore[reportArgumentType]
                 self.extra_metric_trackers[name].update_state(val)
