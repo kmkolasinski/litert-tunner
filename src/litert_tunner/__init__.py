@@ -8,7 +8,7 @@ from litert_tunner.testing_utils import (
     assert_cosine_similarity,
 )
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 
 def load_model(path: str) -> keras.Model:
