@@ -285,12 +285,16 @@ def quantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScala
 
 
 def dequantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
-    """Dequantize simulated INT8 values to float32.
+    """Dequantize simulated INT8 values to float using STE gradients.
 
     Formula: real_value = scale * (x - zero_point)
+
+    The input ``x`` is cast to match ``scale``'s dtype so that computation
+    runs in the layer's compute dtype (e.g. float16 under mixed precision).
     """
-    x_float = ops.cast(x, "float32")
-    return scale * (x_float - zero_point)
+    scale_tensor = ops.convert_to_tensor(scale)
+    x_float = ops.cast(x, ops.dtype(scale_tensor))
+    return scale_tensor * (x_float - zero_point)
 
 
 def fake_quantize(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:

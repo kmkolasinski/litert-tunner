@@ -12,7 +12,7 @@ init: venv ## One-time dev setup: installs uv into the venv
 	@echo "Done! Run 'make install' to install project dependencies and setup pre-commit hooks."
 
 venv: ## Creates a virtual environment
-	python3 -m venv .venv
+	uv venv --python 3.11
 
 activate: ## Activates the virtual environment
 	source .venv/bin/activate

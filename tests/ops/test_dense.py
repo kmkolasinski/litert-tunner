@@ -279,8 +279,9 @@ class TestDenseWriteOps:
         )
 
 
+@pytest.mark.parametrize("dtype_policy", ["float32", "mixed_float16"])
 @pytest.mark.parametrize("quantization", ["int8", "float32"])
-def test__dense_integration(temp_model_dir, run_interpreter, quantization: str):
+def test__dense_integration(temp_model_dir, run_interpreter, quantization: str, dtype_policy: str):
     keras.utils.set_random_seed(42)
 
     inputs = keras.Input(shape=(4,))
@@ -288,7 +289,7 @@ def test__dense_integration(temp_model_dir, run_interpreter, quantization: str):
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 4)
 
-    output_path = temp_model_dir / f"{quantization}_dense_integration.tflite"
+    output_path = temp_model_dir / f"{quantization}_{dtype_policy}_dense_integration.tflite"
     conftest.export_tflite_model(
         input_shape=input_shape[1:],
         model=model,
@@ -300,7 +301,13 @@ def test__dense_integration(temp_model_dir, run_interpreter, quantization: str):
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
 
-    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
+    original_policy = keras.config.dtype_policy()
+    try:
+        keras.config.set_dtype_policy(dtype_policy)
+        atol = op_test_utils.get_default_atol(dtype_policy)
+        op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter, atol=atol)
+    finally:
+        keras.config.set_dtype_policy(original_policy)
 
     op_test_utils.verify_model_contains_operator(output_path, "FULLY_CONNECTED")
 

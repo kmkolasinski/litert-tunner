@@ -223,8 +223,9 @@ class TestFloatDivWriteOps:
         op_test_utils.assert_layer_not_writable(layer)
 
 
+@pytest.mark.parametrize("dtype_policy", ["float32", "mixed_float16"])
 @pytest.mark.parametrize("quantization", ["int8", "float32"])
-def test__div_integration(temp_model_dir, run_interpreter, quantization: str):
+def test__div_integration(temp_model_dir, run_interpreter, quantization: str, dtype_policy: str):
     """Integration test: build a Keras model that produces a TFLite DIV op."""
     keras.utils.set_random_seed(42)
 
@@ -237,7 +238,7 @@ def test__div_integration(temp_model_dir, run_interpreter, quantization: str):
     model = keras.Model(inputs=inputs, outputs=outputs)
     input_shape = (1, 4)
 
-    output_path = temp_model_dir / f"{quantization}_div_integration.tflite"
+    output_path = temp_model_dir / f"{quantization}_{dtype_policy}_div_integration.tflite"
     conftest.export_tflite_model(
         input_shape=input_shape[1:],
         model=model,
@@ -249,6 +250,13 @@ def test__div_integration(temp_model_dir, run_interpreter, quantization: str):
     rng = np.random.default_rng(42)
     x_train = rng.uniform(-1.0, 1.0, input_shape).astype(np.float32)
 
-    op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter)
+    original_policy = keras.config.dtype_policy()
+    try:
+        keras.config.set_dtype_policy(dtype_policy)
+        # bumping atol for mixed_float16
+        atol = op_test_utils.get_default_atol(dtype_policy) if dtype_policy == "float32" else 0.02
+        op_test_utils.verify_model_outputs(output_path, x_train, run_interpreter, atol=atol)
+    finally:
+        keras.config.set_dtype_policy(original_policy)
 
     op_test_utils.verify_model_contains_operator(output_path, "DIV")

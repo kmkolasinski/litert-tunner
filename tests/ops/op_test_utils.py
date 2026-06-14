@@ -170,6 +170,35 @@ def build_and_call(
 
 
 # ---------------------------------------------------------------------------
+# Mixed precision helpers
+# ---------------------------------------------------------------------------
+
+
+# Default tolerance for float32 policy (0.1% relative error)
+_ATOL_FLOAT32 = 0.001
+
+# Relaxed tolerance for mixed_float16 policy (~3 digits of float16 precision)
+_ATOL_MIXED_FLOAT16 = 0.01
+
+
+def get_default_atol(dtype_policy: str) -> float:
+    """Return the default comparison tolerance for a given Keras dtype policy.
+
+    Float16 compute has ~3 decimal digits of precision, so quantization
+    simulation accumulates more rounding error than float32.
+
+    Args:
+        dtype_policy: Keras dtype policy name (e.g. ``"float32"``, ``"mixed_float16"``).
+
+    Returns:
+        Absolute tolerance suitable for ``np.testing.assert_allclose``.
+    """
+    if "float16" in dtype_policy:
+        return _ATOL_MIXED_FLOAT16
+    return _ATOL_FLOAT32
+
+
+# ---------------------------------------------------------------------------
 # Assertion helpers
 # ---------------------------------------------------------------------------
 
@@ -350,6 +379,13 @@ def verify_model_outputs(
     # Compare original LiteRT model with Keras parsed
     keras_model = litert_tunner.load_model(str(model_path))
     keras_outputs = keras_model.predict(x_train)
+
+    # Under mixed precision, Keras outputs may be float16. Cast to float32
+    # for comparison with interpreter outputs (always float32).
+    if isinstance(keras_outputs, list):
+        keras_outputs = [np.asarray(o, dtype=np.float32) for o in keras_outputs]
+    else:
+        keras_outputs = np.asarray(keras_outputs, dtype=np.float32)
 
     if isinstance(litert_outputs, list):
         assert isinstance(keras_outputs, list), "Expected list of Keras outputs"
