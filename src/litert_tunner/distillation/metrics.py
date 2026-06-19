@@ -23,6 +23,9 @@ def cosine_similarity_metric(y_pred: TensorLike, y_true: TensorLike) -> keras.Ke
     y_pred_flat = ops.reshape(y_pred, (ops.shape(y_pred)[0], -1))
     y_true_flat = ops.reshape(y_true, (ops.shape(y_true)[0], -1))
 
+    y_true_flat = ops.cast(y_true_flat, "float32")
+    y_pred_flat = ops.cast(y_pred_flat, "float32")
+
     pred_norm = ops.normalize(y_pred_flat, axis=-1)
     true_norm = ops.normalize(y_true_flat, axis=-1)
 

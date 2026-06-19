@@ -104,7 +104,7 @@ class Trainer(keras.Model):
         self._cached_teacher_outputs = teacher_outputs
 
         # Compute distillation loss
-        distill_loss = self.distillation_loss_fn(y_pred, teacher_outputs)  # pyright: ignore[reportArgumentType]
+        distill_loss = ops.cast(self.distillation_loss_fn(y_pred, teacher_outputs), "float32")  # pyright: ignore[reportArgumentType]
 
         # Compute L2 weight drift loss
         l2_loss = 0.0
@@ -115,6 +115,8 @@ class Trainer(keras.Model):
                     l2_loss += self.l2_weight_decay * ops.mean(
                         ops.square(ops.subtract(v, original_v))
                     )
+
+        l2_loss = ops.cast(l2_loss, "float32")
 
         # Track the components
         self.distill_loss_tracker.update_state(distill_loss)
@@ -128,7 +130,7 @@ class Trainer(keras.Model):
                 x=x, y=y, y_pred=y_pred, sample_weight=sample_weight
             )
             if compiled_loss is not None:
-                total_loss += compiled_loss
+                total_loss += ops.cast(compiled_loss, "float32")
         except ValueError:
             pass
 
