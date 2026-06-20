@@ -1,6 +1,6 @@
 ---
 trigger: model_decision
-description: Instructions for testing new of refactored code
+description: Testing New or Updated Code
 ---
 
 After changes remember about automatic code check!
