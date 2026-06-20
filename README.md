@@ -39,6 +39,7 @@ For a complete, runnable end-to-end example, see the **[Example Notebook](notebo
 
 ```python
 import litert_tunner
+from litert_tunner import distillation
 
 # 1. Load an INT8 LiteRT model → trainable Keras replica
 model = litert_tunner.load_model("model_int8.tflite")
@@ -47,7 +48,7 @@ model = litert_tunner.load_model("model_int8.tflite")
 predictions = model.predict(inputs)
 
 # 3. Prepare for fine-tuning (freeze everything except biases & scales)
-litert_tunner.prepare_for_finetuning(model, trainable_pattern=".*bias")
+distillation.prepare_for_finetuning(model, trainable_pattern=".*bias")
 
 # 4. Fine-tune with any Keras optimizer / loss
 model.compile(optimizer="adam", loss="mse")
@@ -61,20 +62,22 @@ litert_tunner.save_model(model, "model_int8_finetuned.tflite")
 
 ```python
 import litert_tunner
+from litert_tunner import distillation
 
 # 1. Load an INT8 LiteRT model → trainable Keras replica
 student_model = litert_tunner.load_model("model_int8.tflite")
 teacher_model = litert_tunner.load_model("model_float32.tflite")
 
 # 2. Freeze everything except biases
-litert_tunner.prepare_for_finetuning(student_model, trainable_pattern=".*bias")
+distillation.prepare_for_finetuning(student_model, trainable_pattern=".*bias")
 
 # 3. Fine-tune using Trainer (handles distillation & weight drift)
-trainer = litert_tunner.Trainer(
+trainer = distillation.Trainer(
     student_model=student_model,
     teacher_model=teacher_model,  # Original float32 model
+    distillation_loss_fn=distillation.kl_loss,  # Optional: defaults to mse_loss
 )
-trainer.compile(optimizer="adam", loss="mse")
+trainer.compile(optimizer="adam")
 trainer.fit(train_ds, validation_data=val_ds, epochs=5)
 
 # 4. Save updated parameters to flatbuffer
