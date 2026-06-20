@@ -15,9 +15,11 @@ Directly applies keras.ops.concatenate and any fused activation.
 
 from __future__ import annotations
 
+import typing
 from typing import TYPE_CHECKING
 
 import keras
+import numpy as np
 from keras import ops
 
 from litert_tunner.graph import types
@@ -52,6 +54,7 @@ class QuantizedConcatenation(keras.Layer, types.Writable):
         output_zero_point: Zero-point of the output tensor.
         axis: Concatenation axis.
         fused_activation: TFLite fused activation code.
+        constant_inputs: Dictionary mapping input index to its constant numpy array data.
         name: Layer name.
     """
 
@@ -63,6 +66,7 @@ class QuantizedConcatenation(keras.Layer, types.Writable):
         output_zero_point: float,
         axis: int = -1,
         fused_activation: int = utils.FUSED_ACTIVATION_NONE,
+        constant_inputs: dict[int, np.ndarray] | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -72,6 +76,8 @@ class QuantizedConcatenation(keras.Layer, types.Writable):
         self._output_zero_point = output_zero_point
         self._axis = axis
         self._fused_activation = fused_activation
+        self._constant_inputs_data = constant_inputs or {}
+        self._num_inputs = len(input_scales)
 
     def build(self, input_shape: ShapeLike) -> None:
         """Create quantization param variables for each input and output."""
@@ -95,6 +101,24 @@ class QuantizedConcatenation(keras.Layer, types.Writable):
             self._output_zero_point,
             trainable=False,
         )
+
+        # Note: We store the constant weights in a list rather than a dict.
+        # Storing Keras variables in a dict attribute (e.g. `self.constant_inputs = {}`)
+        # was found to cause TFLite export to fail with a `NoneType` error during
+        # model tracing. Using a list with a separate integer map works correctly.
+        self.constant_weights = []
+        self._constant_idx_to_weight_idx = {}
+        for idx, data in self._constant_inputs_data.items():
+            weight = self.add_weight(
+                name=f"constant_input_{idx}",
+                shape=data.shape,
+                initializer=keras.initializers.Constant(
+                    typing.cast("float", data.astype(np.float32))
+                ),
+                trainable=False,
+            )
+            self._constant_idx_to_weight_idx[idx] = len(self.constant_weights)
+            self.constant_weights.append(weight)
         super().build(input_shape)
 
     def call(self, inputs: TensorLike | list[TensorLike] | tuple[TensorLike, ...]) -> TensorLike:
@@ -109,8 +133,20 @@ class QuantizedConcatenation(keras.Layer, types.Writable):
         if not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
+        full_inputs = []
+        dynamic_idx = 0
+        for i in range(self._num_inputs):
+            if i in self._constant_idx_to_weight_idx:
+                weight_idx = self._constant_idx_to_weight_idx[i]
+                full_inputs.append(self.constant_weights[weight_idx])
+            else:
+                full_inputs.append(inputs[dynamic_idx])
+                dynamic_idx += 1
+
         # 1. Dequantize each input to float32
-        float_inputs = [qv.dequantize(x) for x, qv in zip(inputs, self.input_quants, strict=True)]
+        float_inputs = [
+            qv.dequantize(x) for x, qv in zip(full_inputs, self.input_quants, strict=True)
+        ]
         # 2. Concatenate
         output_float = ops.concatenate(float_inputs, axis=self._axis)
         # 3. Fused activation
@@ -147,32 +183,71 @@ class FloatConcatenation(keras.Layer):
     """Float32 CONCATENATION op.
 
     Args:
+        num_inputs: Total number of inputs (dynamic + constant).
         axis: Concatenation axis.
         fused_activation: TFLite fused activation code.
+        constant_inputs: Dictionary mapping input index to its constant numpy array data.
         name: Layer name.
     """
 
     def __init__(
         self,
+        num_inputs: int,
         axis: int = -1,
         fused_activation: int = utils.FUSED_ACTIVATION_NONE,
+        constant_inputs: dict[int, np.ndarray] | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self._num_inputs = num_inputs
         self._axis = axis
         self._fused_activation = fused_activation
+        self._constant_inputs_data = constant_inputs or {}
+
+    def build(self, input_shape: ShapeLike) -> None:
+        """Create variables for constant inputs."""
+        # Note: We store the constant weights in a list rather than a dict.
+        # Storing Keras variables in a dict attribute (e.g. `self.constant_inputs = {}`)
+        # was found to cause TFLite export to fail with a `NoneType` error during
+        # model tracing. Using a list with a separate integer map works correctly.
+        self.constant_weights = []
+        self._constant_idx_to_weight_idx = {}
+        for idx, data in self._constant_inputs_data.items():
+            weight = self.add_weight(
+                name=f"constant_input_{idx}",
+                shape=data.shape,
+                initializer=keras.initializers.Constant(
+                    typing.cast("float", data.astype(np.float32))
+                ),
+                trainable=False,
+            )
+            self._constant_idx_to_weight_idx[idx] = len(self.constant_weights)
+            self.constant_weights.append(weight)
+        super().build(input_shape)
 
     def call(self, inputs: TensorLike | list[TensorLike] | tuple[TensorLike, ...]) -> TensorLike:
         """Forward pass applying concatenation in float32."""
         if not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
-        output_float = ops.concatenate(inputs, axis=self._axis)
+
+        full_inputs = []
+        dynamic_idx = 0
+        for i in range(self._num_inputs):
+            if i in self._constant_idx_to_weight_idx:
+                weight_idx = self._constant_idx_to_weight_idx[i]
+                full_inputs.append(self.constant_weights[weight_idx])
+            else:
+                full_inputs.append(inputs[dynamic_idx])
+                dynamic_idx += 1
+
+        output_float = ops.concatenate(full_inputs, axis=self._axis)
         return utils.apply_fused_activation(output_float, self._fused_activation)
 
     def get_config(self):
         """Return the configuration dictionary for serialization."""
         config = super().get_config()
         config.update({
+            "num_inputs": self._num_inputs,
             "axis": self._axis,
             "fused_activation": self._fused_activation,
         })
@@ -219,7 +294,8 @@ def _build_quantized_concatenation(
 
     input_scales: list[float] = []
     input_zero_points: list[float] = []
-    for idx in op.input_indices:
+    constant_inputs = {}
+    for i, idx in enumerate(op.input_indices):
         input_tensor = tensors[idx]
         input_quant = input_tensor.quantization
         if input_quant is None:
@@ -227,6 +303,8 @@ def _build_quantized_concatenation(
             raise ValueError(msg)
         input_scales.append(float(input_quant.scales[0]))
         input_zero_points.append(float(input_quant.zero_points[0]))
+        if input_tensor.data is not None:
+            constant_inputs[i] = input_tensor.data.astype(np.float32)
 
     axis = op.options.get("Axis", -1)
     fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
@@ -238,20 +316,29 @@ def _build_quantized_concatenation(
         output_zero_point=float(output_quant.zero_points[0]),
         axis=axis,
         fused_activation=fused_activation,
+        constant_inputs=constant_inputs,
         name=f"quantized_concatenation_{op.output_indices[0]}",
     )
 
 
 def _build_float_concatenation(
     op: types.OperatorInfo,
-    tensors: tuple[types.TensorInfo, ...],  # noqa: ARG001
+    tensors: tuple[types.TensorInfo, ...],
 ) -> keras.Layer:
     """Build a FloatConcatenation layer."""
     axis = op.options.get("Axis", -1)
     fused_activation = op.options.get("fused_activation_function", utils.FUSED_ACTIVATION_NONE)
 
+    constant_inputs = {}
+    for i, idx in enumerate(op.input_indices):
+        input_tensor = tensors[idx]
+        if input_tensor.data is not None:
+            constant_inputs[i] = input_tensor.data.astype(np.float32)
+
     return FloatConcatenation(
+        num_inputs=len(op.input_indices),
         axis=axis,
         fused_activation=fused_activation,
+        constant_inputs=constant_inputs,
         name=f"float_concatenation_{op.output_indices[0]}",
     )

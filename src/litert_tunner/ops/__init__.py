@@ -34,6 +34,7 @@ from litert_tunner.ops import (
     sub,
     tile,
     transpose,
+    transpose_conv,
     utils,
 )
 
@@ -66,5 +67,6 @@ __all__ = [
     "sub",
     "tile",
     "transpose",
+    "transpose_conv",
     "utils",
 ]

@@ -83,11 +83,11 @@ litert_tunner.save_model(student_model, "model_int8_finetuned.tflite")
 
 ## Supported Operations
 
-- **Linear:** `FULLY_CONNECTED`, `CONV_2D`, `DEPTHWISE_CONV_2D`
+- **Linear:** `FULLY_CONNECTED`, `CONV_2D`, `DEPTHWISE_CONV_2D`, `TRANSPOSE_CONV`
 - **Arithmetic:** `ADD`, `SUB`, `MUL`, `DIV`, `SQUARED_DIFFERENCE`, `NEG`
 - **Activation:** `RELU`, `GELU`, `LOGISTIC`, `SOFTMAX`
 - **Pooling:** `AVERAGE_POOL_2D`, `MAX_POOL_2D`, `MEAN`
-- **Reshape/Resize:** `RESHAPE`, `TRANSPOSE`, `PACK`, `STRIDED_SLICE`, `RESIZE_NEAREST_NEIGHBOR`, `SHAPE`
+- **Reshape/Resize:** `RESHAPE`, `TRANSPOSE`, `PACK`, `STRIDED_SLICE`, `RESIZE_NEAREST_NEIGHBOR`, `SHAPE`, `EXPAND_DIMS`, `PAD`, `TILE`
 - **Other:** `CONCATENATION`, `RSQRT`, `QUANTIZE`, `DEQUANTIZE`
 
 Fused activations (`RELU`, `RELU6`, `RELU_N1_TO_1`) are supported.

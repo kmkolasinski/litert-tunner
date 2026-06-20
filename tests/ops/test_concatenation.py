@@ -235,6 +235,110 @@ class TestFloatConcatenationTrainableWeights:
         op_test_utils.assert_layer_not_writable(layer)
 
 
+@pytest.fixture
+def concat_constant_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a CONCATENATION op with one constant INT8 input."""
+    input1_quant = op_test_utils.make_quant_params(scales=[0.1], zero_points=[-5])
+    input1_tensor = op_test_utils.make_tensor(
+        name="input1_int8", index=0, shape=(1, 4), dtype=types.DTYPE_INT8, quantization=input1_quant
+    )
+
+    input2_quant = op_test_utils.make_quant_params(scales=[0.2], zero_points=[0])
+    input2_tensor = op_test_utils.make_tensor(
+        name="input2_constant",
+        index=1,
+        shape=(1, 3),
+        dtype=types.DTYPE_INT8,
+        quantization=input2_quant,
+        data=np.array([[10, 20, 30]], dtype=np.int8),
+    )
+
+    output_quant = op_test_utils.make_quant_params(scales=[0.5], zero_points=[10])
+    output_tensor = op_test_utils.make_tensor(
+        name="output_int8", index=2, shape=(1, 7), dtype=types.DTYPE_INT8, quantization=output_quant
+    )
+
+    tensors = (input1_tensor, input2_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="CONCATENATION",
+        input_indices=(0, 1),
+        output_indices=(2,),
+        options={"Axis": 1},
+    )
+    return op, tensors
+
+
+class TestConcatenationConstant:
+    def test__concatenation_with_constant_returns_keras_layer(self, concat_constant_setup):
+        op, tensors = concat_constant_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        assert isinstance(layer, keras.Layer)
+
+    def test__concatenation_with_constant_call(self, concat_constant_setup):
+        op, tensors = concat_constant_setup
+        # input1_scale = 0.1, input1_zp = -5
+        # 0 in input1 means: 0.1 * (0 - (-5)) = 0.5
+        input1_data = np.array([[0, 1, 2, 3]], dtype=np.float32)
+
+        _, output = op_test_utils.build_and_call(op, tensors, [input1_data])
+
+        # Concatenated float: [0.5, 0.6, 0.7, 0.8, 2.0, 4.0, 6.0]
+        # output_scale = 0.5, output_zp = 10
+        # quantize: round value (val / 0.5) + 10
+        expected = np.array([[11.0, 11.0, 11.0, 12.0, 14.0, 18.0, 22.0]], dtype=np.float32)
+
+        np.testing.assert_allclose(output, expected, atol=1e-5)
+
+
+@pytest.fixture
+def float_concatenation_constant_setup() -> tuple[types.OperatorInfo, tuple[types.TensorInfo, ...]]:
+    """Create a CONCATENATION op with one constant float32 input."""
+    input1_tensor = op_test_utils.make_tensor(
+        name="input1_f32", index=0, shape=(1, 4), dtype=types.DTYPE_FLOAT32, quantization=None
+    )
+
+    input2_tensor = op_test_utils.make_tensor(
+        name="input2_constant_f32",
+        index=1,
+        shape=(1, 3),
+        dtype=types.DTYPE_FLOAT32,
+        quantization=None,
+        data=np.array([[2.0, 4.0, 6.0]], dtype=np.float32),
+    )
+
+    output_tensor = op_test_utils.make_tensor(
+        name="output_f32", index=2, shape=(1, 7), dtype=types.DTYPE_FLOAT32, quantization=None
+    )
+
+    tensors = (input1_tensor, input2_tensor, output_tensor)
+    op = op_test_utils.make_operator(
+        op_type="CONCATENATION",
+        input_indices=(0, 1),
+        output_indices=(2,),
+        options={"Axis": 1},
+    )
+    return op, tensors
+
+
+class TestFloatConcatenationConstant:
+    def test__float_concatenation_with_constant_returns_keras_layer(
+        self, float_concatenation_constant_setup
+    ):
+        op, tensors = float_concatenation_constant_setup
+        layer = op_test_utils.build_layer_from_registry(op, tensors)
+        assert isinstance(layer, keras.Layer)
+
+    def test__float_concatenation_with_constant_call(self, float_concatenation_constant_setup):
+        op, tensors = float_concatenation_constant_setup
+        input1_data = np.array([[0.5, 0.6, 0.7, 0.8]], dtype=np.float32)
+
+        _, output = op_test_utils.build_and_call(op, tensors, [input1_data])
+
+        expected = np.array([[0.5, 0.6, 0.7, 0.8, 2.0, 4.0, 6.0]], dtype=np.float32)
+
+        np.testing.assert_allclose(output, expected, atol=1e-5)
+
+
 @pytest.mark.parametrize("dtype_policy", ["float32", "mixed_float16"])
 @pytest.mark.parametrize("quantization", ["int8", "float32"])
 def test__concatenation_integration(

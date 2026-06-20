@@ -75,7 +75,7 @@ src/litert_tunner/
 │                            #   GraphDef, BufferWriteOp, QuantizationWriteOp, Writable)
 │                            # builder.py (build_keras_model: GraphDef → Keras Functional)
 └── ops/                     # registry.py, utils.py, one file per op
-    ├── dense.py, conv2d.py, depthwise_conv2d.py
+    ├── dense.py, conv2d.py, depthwise_conv2d.py, transpose_conv.py
     ├── add.py, sub.py, mul.py, div.py
     ├── concatenation.py, mean.py, pool.py
     ├── softmax.py, logistic.py, relu.py, gelu.py
