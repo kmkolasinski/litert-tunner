@@ -50,19 +50,6 @@ def expand_dims_if_not_scalar(tensor: TensorLike, axis: int) -> TensorLike:
     return tensor
 
 
-def quantize_to_int8(tensor: TensorLike) -> np.ndarray:
-    """Converts a tensor to a rounded numpy INT8 array.
-
-    Args:
-        tensor: The input tensor to round and convert.
-
-    Returns:
-        NumPy array with dtype int8.
-    """
-    val = typing.cast("np.ndarray", ops.convert_to_numpy(tensor))
-    return np.clip(np.round(val), INT8_MIN, INT8_MAX).astype(np.int8)
-
-
 def quantize_bias_to_int32(
     bias_tensor: TensorLike,
     input_scale_tensor: TensorLike,
@@ -181,48 +168,6 @@ def apply_fused_activation(x: TensorLike, fused_activation: int) -> TensorLike:
     raise ValueError(msg)
 
 
-def quantize_int8(
-    x: np.ndarray,
-    scale: np.ndarray | float,
-    zero_point: np.ndarray | int,
-) -> np.ndarray:
-    """Quantize float32 values to INT8 using TFLite's affine scheme.
-
-    Formula: int8_value = clamp(round(x / scale) + zero_point, -128, 127)
-
-    Args:
-        x: Float32 values to quantize.
-        scale: Quantization scale (per-tensor or per-channel).
-        zero_point: Quantization zero point (per-tensor or per-channel).
-
-    Returns:
-        INT8 quantized values as int8 numpy array.
-    """
-    scaled = np.round(x / scale) + zero_point
-    clamped = np.clip(scaled, INT8_MIN, INT8_MAX)
-    return clamped.astype(np.int8)
-
-
-def dequantize_float(
-    x: np.ndarray,
-    scale: np.ndarray | float,
-    zero_point: np.ndarray | int,
-) -> np.ndarray:
-    """Dequantize INT8 values to float32 using TFLite's affine scheme.
-
-    Formula: real_value = scale * (int8_value - zero_point)
-
-    Args:
-        x: INT8 quantized values.
-        scale: Quantization scale (per-tensor or per-channel).
-        zero_point: Quantization zero point (per-tensor or per-channel).
-
-    Returns:
-        Float32 dequantized values.
-    """
-    return scale * (x.astype(np.float32) - np.float32(zero_point))
-
-
 def compute_requantize_multiplier(
     input_scale: float,
     weight_scale: np.ndarray | float,
@@ -245,7 +190,20 @@ def compute_requantize_multiplier(
     return (input_scale * weight_scale) / output_scale
 
 
-def _round_ste(x: TensorLike) -> TensorLike:
+def round_to_int8_ndarray(tensor: TensorLike) -> np.ndarray:
+    """Converts a tensor to a rounded numpy INT8 array.
+
+    Args:
+        tensor: The input tensor to round and convert.
+
+    Returns:
+        NumPy array with dtype int8.
+    """
+    val = typing.cast("np.ndarray", ops.convert_to_numpy(tensor))
+    return np.clip(np.round(val), INT8_MIN, INT8_MAX).astype(np.int8)
+
+
+def round_ste(x: TensorLike) -> TensorLike:
     """Round with Straight-Through Estimator.
 
     Forward: round(x)
@@ -254,7 +212,7 @@ def _round_ste(x: TensorLike) -> TensorLike:
     return x + ops.stop_gradient(ops.round(x) - x)
 
 
-def quantize_to_int8_ste(x: TensorLike) -> TensorLike:
+def round_to_int8_ste(x: TensorLike) -> TensorLike:
     """Quantize float values to INT8 range with STE gradients.
 
     Differentiable equivalent of ``quantize_to_int8``. Rounds to nearest
@@ -267,8 +225,7 @@ def quantize_to_int8_ste(x: TensorLike) -> TensorLike:
     Returns:
         Tensor with values rounded and clamped to [-128, 127].
     """
-    rounded = _round_ste(x)
-    return ops.clip(rounded, _INT8_MIN_F, _INT8_MAX_F)
+    return ops.clip(round_ste(x), _INT8_MIN_F, _INT8_MAX_F)
 
 
 def quantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
@@ -279,7 +236,7 @@ def quantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScala
     gradient budget pushing already-saturated values further out of range.
     """
     scaled = x / scale
-    rounded = _round_ste(scaled)
+    rounded = round_ste(scaled)
     shifted = rounded + zero_point
     return ops.clip(shifted, _INT8_MIN_F, _INT8_MAX_F)
 
@@ -297,12 +254,6 @@ def dequantize_ste(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrSca
     return scale_tensor * (x_float - zero_point)
 
 
-def fake_quantize(x: TensorLike, scale: TensorOrScalar, zero_point: TensorOrScalar) -> TensorLike:
-    """Fake quantize: quantize then dequantize with STE gradients."""
-    quantized = quantize_ste(x, scale, zero_point)
-    return dequantize_ste(quantized, scale, zero_point)
-
-
 def fake_quantize_bias(
     bias: TensorLike,
     input_scale: TensorOrScalar,
@@ -315,7 +266,7 @@ def fake_quantize_bias(
     """
     bias_scale = input_scale * weight_scale
     scaled_bias = bias / bias_scale
-    rounded_bias = _round_ste(scaled_bias)
+    rounded_bias = round_ste(scaled_bias)
     return rounded_bias * bias_scale
 
 

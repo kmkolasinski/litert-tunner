@@ -150,7 +150,7 @@ class QuantizedDense(keras.Layer, types.Writable):
         # 2. Dequantize weights: float = scale * (int8 - zero_point)
         # Always apply quantize_to_int8_ste to ensure valid INT8 values.
         # It's a no-op on already-valid integers but keeps the gradient path.
-        weight_int8 = utils.quantize_to_int8_ste(self.weight_int8)
+        weight_int8 = utils.round_to_int8_ste(self.weight_int8)
 
         scale_expanded = utils.expand_dims_if_not_scalar(self.weight_quant.scale, 1)
         zp_expanded = utils.expand_dims_if_not_scalar(self.weight_quant.zero_point, 1)
@@ -208,7 +208,7 @@ class QuantizedDense(keras.Layer, types.Writable):
         op_outputs = typing.cast("typing.Any", op.output_indices)
 
         # Write weight_int8 buffer
-        weight_int8 = utils.quantize_to_int8(self.weight_int8)
+        weight_int8 = utils.round_to_int8_ndarray(self.weight_int8)
         weight_tensor_idx = op_inputs[1]
         buffer_writes.append(
             types.BufferWriteOp(tensor_index=weight_tensor_idx, data=bytes(weight_int8.tobytes()))

@@ -15,7 +15,7 @@ import pytest
 from keras import ops
 
 from litert_tunner.graph import types
-from litert_tunner.ops import quantize_op, registry, utils
+from litert_tunner.ops import quantize_op, registry
 from tests import conftest
 from tests.ops import op_test_utils
 
@@ -578,7 +578,7 @@ class TestQuantizeLayer:
         y_np = np.asarray(ops.convert_to_numpy(y))
 
         # Replicate expected quantization in float
-        q_np = utils.quantize_int8(x, scale, int(zero_point))
+        q_np = np.clip(np.round(x / scale) + zero_point, -128, 127).astype(np.int8)
 
         # The layer outputs float32 values that are within INT8 range
         assert np.allclose(y_np, q_np.astype(np.float32), atol=1e-5)
@@ -630,8 +630,7 @@ class TestDequantizeLayer:
         y = layer(x)
         y_np = np.asarray(ops.convert_to_numpy(y))
 
-        # Replicate with utils helper
-        deq_np = utils.dequantize_float(x, scale, int(zero_point))
+        deq_np = scale * (x.astype(np.float32) - np.float32(zero_point))
 
         assert np.allclose(y_np, deq_np, atol=1e-5)
 

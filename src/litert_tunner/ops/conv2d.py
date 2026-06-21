@@ -166,7 +166,7 @@ class QuantizedConv2D(keras.Layer, types.Writable):
         # Scale shape: (out_ch,) → expand to (out_ch, 1, 1, 1)
         # Always apply quantize_to_int8_ste to ensure valid INT8 values.
         # It's a no-op on already-valid integers but keeps the gradient path.
-        weight_int8 = utils.quantize_to_int8_ste(self.weight_int8)
+        weight_int8 = utils.round_to_int8_ste(self.weight_int8)
         weight_scale = self.weight_quant.scale
         weight_zp = self.weight_quant.zero_point
         if len(weight_scale.shape) > 0:
@@ -235,7 +235,7 @@ class QuantizedConv2D(keras.Layer, types.Writable):
         op_outputs = typing.cast("typing.Any", op.output_indices)
 
         # Write weight_int8 buffer
-        weight_int8 = utils.quantize_to_int8(self.weight_int8)
+        weight_int8 = utils.round_to_int8_ndarray(self.weight_int8)
         weight_tensor_idx = op_inputs[1]
         buffer_writes.append(
             types.BufferWriteOp(tensor_index=weight_tensor_idx, data=bytes(weight_int8.tobytes()))

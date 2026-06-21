@@ -35,7 +35,7 @@ def test__expand_dims_if_not_scalar():
 def test__quantize_to_int8():
     """Verify quantize_to_int8 correctly rounds and converts to int8."""
     tensor = ops.convert_to_tensor([1.2, 2.8, -0.6, -1.2])
-    res = utils.quantize_to_int8(tensor)
+    res = utils.round_to_int8_ndarray(tensor)
     assert res.dtype == np.int8
     np.testing.assert_array_equal(res, [1, 3, -1, -1])
 
@@ -134,28 +134,6 @@ def test__apply_fused_activation():
     )
 
 
-def test__quantize_int8():
-    """Verify numpy-based quantize_int8 function."""
-    x = np.array([-1.5, 0.0, 1.5, 20.0], dtype=np.float32)
-    scale = 0.1
-    zero_point = 5
-    res = utils.quantize_int8(x, scale, zero_point)
-    assert res.dtype == np.int8
-    expected = np.clip(np.round(x / scale) + zero_point, -128, 127).astype(np.int8)
-    np.testing.assert_array_equal(res, expected)
-
-
-def test__dequantize_float():
-    """Verify numpy-based dequantize_float function."""
-    x = np.array([-15, 0, 15, 127], dtype=np.int8)
-    scale = 0.1
-    zero_point = 5
-    res = utils.dequantize_float(x, scale, zero_point)
-    assert res.dtype == np.float32
-    expected = scale * (x.astype(np.float32) - np.float32(zero_point))
-    np.testing.assert_allclose(res, expected)
-
-
 def test__compute_requantize_multiplier():
     """Verify compute_requantize_multiplier logic."""
     input_scale = 0.5
@@ -170,8 +148,8 @@ def test__round_ste(compute_gradient: typing.Callable):
     """Verify _round_ste returns rounded values forward and passes gradients backward."""
     x_val = [1.2, 2.7, -0.6]
 
-    grads = compute_gradient(utils._round_ste, x_val)
-    y = utils._round_ste(ops.convert_to_tensor(x_val))
+    grads = compute_gradient(utils.round_ste, x_val)
+    y = utils.round_ste(ops.convert_to_tensor(x_val))
 
     np.testing.assert_allclose(_to_numpy(y), [1.0, 3.0, -1.0])
     # STE: gradient is identity (all ones)
@@ -224,27 +202,6 @@ def test__dequantize_ste():
     y = utils.dequantize_ste(x, scale, zero_point)
     expected = scale * (_to_numpy(x) - zero_point)
     np.testing.assert_allclose(_to_numpy(y), expected, atol=1e-5)
-
-
-def test__fake_quantize(compute_gradient: typing.Callable):
-    """Verify _fake_quantize helper performs quantize and then dequantize."""
-    x_val = [-1.2, -0.2, 0.3, 1.4]
-    scale = 0.05
-    zero_point = -10.0
-
-    def func(x):
-        return utils.fake_quantize(x, scale, zero_point)
-
-    grads = compute_gradient(func, x_val)
-    y = func(ops.convert_to_tensor(x_val))
-
-    # Replicate forward
-    q = np.clip(np.round(np.array(x_val) / scale) + zero_point, -128.0, 127.0)
-    expected = scale * (q - zero_point)
-    np.testing.assert_allclose(_to_numpy(y), expected, atol=1e-5)
-
-    # STE gradient is constant one
-    np.testing.assert_allclose(grads, [1.0, 1.0, 1.0, 1.0])
 
 
 def test__fake_quantize_bias(compute_gradient: typing.Callable):
@@ -324,7 +281,7 @@ def test__make_bias_quant_write_op():
 def test__quantize_to_int8_ste_forward():
     """Verify quantize_to_int8_ste rounds and clamps to [-128, 127]."""
     x = ops.convert_to_tensor([1.2, 2.8, -0.6, -130.0, 200.5], dtype="float32")
-    result = _to_numpy(utils.quantize_to_int8_ste(x))
+    result = _to_numpy(utils.round_to_int8_ste(x))
     expected = np.array([1.0, 3.0, -1.0, -128.0, 127.0], dtype=np.float32)
     np.testing.assert_allclose(result, expected)
 
@@ -333,7 +290,7 @@ def test__quantize_to_int8_ste_gradient(compute_gradient: typing.Callable):
     """Verify STE gradients: identity in range, zero outside."""
     x_val = [0.5, -129.0, 130.0, 42.3]
 
-    grads = compute_gradient(utils.quantize_to_int8_ste, x_val)
+    grads = compute_gradient(utils.round_to_int8_ste, x_val)
     # In-range values get gradient 1, out-of-range get 0
     np.testing.assert_allclose(grads, [1.0, 0.0, 0.0, 1.0])
 
@@ -347,7 +304,7 @@ def test__quantize_to_int8_ste_matches_quantize_to_int8():
     rng = np.random.default_rng(42)
     values = rng.uniform(-150.0, 150.0, (100,)).astype(np.float32)
 
-    ste_result = _to_numpy(utils.quantize_to_int8_ste(ops.convert_to_tensor(values)))
-    numpy_result = utils.quantize_to_int8(ops.convert_to_tensor(values)).astype(np.float32)
+    ste_result = _to_numpy(utils.round_to_int8_ste(ops.convert_to_tensor(values)))
+    numpy_result = utils.round_to_int8_ndarray(ops.convert_to_tensor(values)).astype(np.float32)
 
     np.testing.assert_array_equal(ste_result, numpy_result)
